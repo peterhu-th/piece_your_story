@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <!-- 锁定设备缩放，禁止多点触控放大缩小，适配移动端 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>拼好你的人生 - Piece Your Story</title>
+    <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+    <div id="gameContainer">
+        <!-- 核心游戏画布 -->
+        <canvas id="gameCanvas"></canvas>
+        <!-- 错误或调试提示文字 -->
+        <div id="uiLayer"></div>
+    </div>
+
+    <!-- 严格按依赖顺序引入脚本 -->
+    <script src="./js/config.js"></script>
+    <script src="./js/templates.js"></script>
+    <script src="./js/input.js"></script>
+    <script src="./js/renderer.js"></script>
+    <script src="./js/core.js"></script>
+</body>
+</html>

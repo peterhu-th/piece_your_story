@@ -1,0 +1,473 @@
+/**
+ * core.js
+ * 游戏主程序，包含状态机、物理引擎、事件处理与游戏循环
+ */
+
+class GameCore {
+    constructor() {
+        this.config = GameConfig;
+        this.renderer = new Renderer('gameCanvas');
+        this.input = new InputManager(this.renderer.canvas, this.renderer.camera);
+        
+        // 绑定点击事件
+        this.input.onTap = this.handleTap.bind(this);
+
+        // 游戏状态枚举
+        this.STATES = {
+            LOADING: 0,
+            LOBBY: 1,
+            INTRO: 2,   // 放大镜头
+            PLAY: 3,    // 游玩
+            SETTLE: 4,  // 拼完，缩小镜头，显示文字
+            END: 5      // 终局轮播
+        };
+        this.currentState = this.STATES.LOADING;
+
+        // 关卡进度
+        this.currentLevelIndex = parseInt(localStorage.getItem('piece_your_story_level')) || 0;
+        if (this.currentLevelIndex >= this.config.levels.length) {
+            this.currentLevelIndex = 0; // 重置或通关状态
+        }
+
+        // 运行时数据
+        this.blurCache = {}; // 缓存每关模糊图
+        this.pieces = [];    // 当前关卡的拼图碎片
+        this.bgParams = {};  // 背景的真实渲染尺寸和位置
+        this.cutoutBox = {}; // 挖空区域的真实坐标和宽高
+        this.lastTime = performance.now();
+        
+        this.stateStartTime = 0; // 记录状态切换的时间点，用于动画过渡
+        
+        // 终局动画专用
+        this.endingSlideIndex = 0;
+        this.endingLastSlideTime = 0;
+
+        // 启动游戏
+        this.init();
+    }
+
+    async init() {
+        try {
+            // 收集所有需要预加载的图片
+            const imagePaths = [this.config.lobby.wallImage];
+            this.config.levels.forEach(l => {
+                imagePaths.push(l.image);
+            });
+
+            await this.renderer.loadImages(imagePaths);
+            
+            // 预生成模糊图片，防止游戏过程中卡顿
+            this.config.levels.forEach(l => {
+                const img = this.renderer.getImage(l.image);
+                this.blurCache[l.image] = this.renderer.generateBlurredImage(img, this.config.core.blurRadius);
+            });
+
+            // 进入大厅
+            this.switchState(this.STATES.LOBBY);
+            
+            // 开始循环
+            requestAnimationFrame((time) => this.loop(time));
+
+        } catch (error) {
+            console.error(error);
+            document.getElementById('uiLayer').innerText = this.config.ui.errorPrompt;
+        }
+    }
+
+    switchState(newState) {
+        this.currentState = newState;
+        this.stateStartTime = performance.now();
+        const uiLayer = document.getElementById('uiLayer');
+        uiLayer.innerText = ''; // 清空提示
+
+        if (newState === this.STATES.LOBBY) {
+            // 恢复相机
+            this.renderer.camera.x = 0;
+            this.renderer.camera.y = 0;
+            this.renderer.camera.scale = 1;
+            uiLayer.innerText = this.config.ui.clickToStart;
+        } 
+        else if (newState === this.STATES.INTRO) {
+            this.prepareLevel(this.config.levels[this.currentLevelIndex]);
+        }
+        else if (newState === this.STATES.PLAY) {
+            // 碎片开始移动
+            this.pieces.forEach(p => p.spawn());
+        }
+        else if (newState === this.STATES.SETTLE) {
+            // 保存进度
+            localStorage.setItem('piece_your_story_level', this.currentLevelIndex + 1);
+        }
+        else if (newState === this.STATES.END) {
+            this.endingSlideIndex = 0;
+            this.endingLastSlideTime = performance.now();
+            localStorage.removeItem('piece_your_story_level'); // 通关后清除记录
+        }
+    }
+
+    /**
+     * 准备关卡：计算裁剪区域、生成拼图碎片网格
+     */
+    prepareLevel(levelData) {
+        const img = this.renderer.getImage(levelData.image);
+        // 先计算一次全图显示的参数，以便获得 bgW, bgH, bgX, bgY
+        this.bgParams = this.renderer.getCoverDrawParams(img.width, img.height, this.renderer.width, this.renderer.height);
+        
+        // 计算挖空区域 (Cutout) 在屏幕上的真实包围盒
+        this.cutoutBox = {
+            x: this.bgParams.x + levelData.cutoutBoundary.x * this.bgParams.w,
+            y: this.bgParams.y + levelData.cutoutBoundary.y * this.bgParams.h,
+            width: levelData.cutoutBoundary.width * this.bgParams.w,
+            height: levelData.cutoutBoundary.height * this.bgParams.h
+        };
+
+        // 按网格拆分碎片
+        this.pieces = [];
+        const cols = levelData.grid.cols;
+        const rows = levelData.grid.rows;
+        const pieceW = this.cutoutBox.width / cols;
+        const pieceH = this.cutoutBox.height / rows;
+
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                // 决定边缘的凹凸形状 (0: 平, 1: 凸, -1: 凹)
+                const edges = {
+                    top: r === 0 ? 0 : (Math.random() > 0.5 ? 1 : -1),
+                    bottom: r === rows - 1 ? 0 : (Math.random() > 0.5 ? 1 : -1),
+                    left: c === 0 ? 0 : (Math.random() > 0.5 ? 1 : -1),
+                    right: c === cols - 1 ? 0 : (Math.random() > 0.5 ? 1 : -1)
+                };
+
+                // 为了让相邻的边严丝合缝，如果前一个块的右边是凸(1)，则当前块的左边必须是凹(-1)
+                // 这里需要简单的联动修正
+                if (c > 0) {
+                    const leftPiece = this.pieces[this.pieces.length - 1];
+                    edges.left = -leftPiece.edges.right;
+                }
+                if (r > 0) {
+                    const topPiece = this.pieces[(r - 1) * cols + c];
+                    edges.top = -topPiece.edges.bottom;
+                }
+
+                const targetX = this.cutoutBox.x + c * pieceW;
+                const targetY = this.cutoutBox.y + r * pieceH;
+
+                const path = Templates.getJigsawPath(pieceW, pieceH, edges);
+
+                this.pieces.push({
+                    id: `${r}-${c}`,
+                    width: pieceW,
+                    height: pieceH,
+                    targetX: targetX,
+                    targetY: targetY,
+                    edges: edges,
+                    path2d: path,
+                    state: 'WAITING', // WAITING, MOVING, FALLING, PLACED
+                    currentX: 0,
+                    currentY: 0,
+                    speedX: 0,
+                    speedY: 0,
+                    zIndex: Math.random(),
+                    
+                    spawn: () => {
+                        const conf = this.config.pieces;
+                        // 从上方轨道随机选一条
+                        const trackY = this.renderer.height * conf.yPositionTracks[Math.floor(Math.random() * conf.yPositionTracks.length)];
+                        const speed = conf.speedRange.min + Math.random() * (conf.speedRange.max - conf.speedRange.min);
+                        const isLeft = Math.random() < conf.directionProb;
+                        
+                        this.pieces[this.pieces.length - 1].state = 'MOVING'; // oops, should be using `this` referring to piece
+                        // Let's fix this in spawn context
+                    }
+                });
+            }
+        }
+        
+        // 修正 piece 内的方法作用域
+        this.pieces.forEach(p => {
+            p.spawn = () => {
+                const conf = this.config.pieces;
+                const trackY = this.renderer.height * conf.yPositionTracks[Math.floor(Math.random() * conf.yPositionTracks.length)];
+                const speed = conf.speedRange.min + Math.random() * (conf.speedRange.max - conf.speedRange.min);
+                const isLeft = Math.random() < conf.directionProb;
+
+                const worldPosLeft = this.input.screenToWorld(-p.width - 100, trackY);
+                const worldPosRight = this.input.screenToWorld(this.renderer.width + 100, trackY);
+
+                p.state = 'MOVING';
+                p.currentY = worldPosLeft.y;
+                if (isLeft) {
+                    p.currentX = worldPosRight.x;
+                    p.speedX = -speed / this.renderer.camera.scale;
+                } else {
+                    p.currentX = worldPosLeft.x;
+                    p.speedX = speed / this.renderer.camera.scale;
+                }
+                p.speedY = 0;
+            };
+        });
+    }
+
+    /**
+     * 处理点击事件
+     */
+    handleTap(worldX, worldY) {
+        if (this.currentState === this.STATES.LOBBY) {
+            // 点击任意处进入第一关（或当前保存的关卡）
+            if (this.currentLevelIndex >= this.config.levels.length) {
+                this.currentLevelIndex = 0;
+            }
+            this.switchState(this.STATES.INTRO);
+        }
+        else if (this.currentState === this.STATES.PLAY) {
+            // 检测点击到的 moving 状态的碎片
+            const hitPieces = this.pieces.filter(p => p.state === 'MOVING' && this.input.isPointInPiece(worldX, worldY, p));
+            if (hitPieces.length > 0) {
+                // 根据 zIndex 策略选取
+                if (this.config.core.overlapZIndexStrategy === 'highest') {
+                    hitPieces.sort((a, b) => b.zIndex - a.zIndex);
+                }
+                const target = hitPieces[0];
+                target.state = 'FALLING';
+                target.speedX = 0;
+                target.speedY = 0; // 初始下落速度
+            }
+        }
+        else if (this.currentState === this.STATES.SETTLE) {
+            // Settle 结束且提示文字展示完毕后，点击进入下一关或结局
+            const timeSince = performance.now() - this.stateStartTime;
+            if (timeSince > this.config.animation.zoomOut) {
+                this.currentLevelIndex++;
+                if (this.currentLevelIndex < this.config.levels.length) {
+                    this.switchState(this.STATES.INTRO);
+                } else {
+                    this.switchState(this.STATES.END);
+                }
+            }
+        }
+    }
+
+    /**
+     * 主循环更新
+     */
+    update(dt) {
+        if (this.currentState === this.STATES.PLAY) {
+            let allPlaced = true;
+            const conf = this.config.pieces;
+
+            this.pieces.forEach(p => {
+                if (p.state !== 'PLACED') allPlaced = false;
+
+                if (p.state === 'MOVING') {
+                    // 按帧率独立更新，这里由于 dt 波动可能导致速度不一，简化为按帧加
+                    p.currentX += p.speedX * (dt / (1000/60));
+                    
+                    const worldPosLeft = this.input.screenToWorld(-p.width - 100, 0);
+                    const worldPosRight = this.input.screenToWorld(this.renderer.width + 100, 0);
+
+                    // 飞出屏幕则重生
+                    if (p.speedX > 0 && p.currentX > worldPosRight.x) {
+                        p.state = 'WAITING';
+                        setTimeout(() => p.spawn(), conf.spawnDelay.min + Math.random()*(conf.spawnDelay.max-conf.spawnDelay.min));
+                    } else if (p.speedX < 0 && p.currentX < worldPosLeft.x) {
+                        p.state = 'WAITING';
+                        setTimeout(() => p.spawn(), conf.spawnDelay.min + Math.random()*(conf.spawnDelay.max-conf.spawnDelay.min));
+                    }
+                } 
+                else if (p.state === 'FALLING') {
+                    p.speedY += conf.fallAcceleration * (dt / (1000/60));
+                    p.currentY += p.speedY * (dt / (1000/60));
+
+                    // 吸附检测
+                    if (p.currentY >= p.targetY) {
+                        const dist = Math.abs(p.currentX - p.targetX);
+                        if (dist <= this.config.core.snapTolerance) {
+                            // 吸附成功
+                            p.state = 'PLACED';
+                            p.currentX = p.targetX;
+                            p.currentY = p.targetY;
+                        } else {
+                            // 继续掉落
+                        }
+                    }
+
+                    // 掉落出界
+                    const worldBottom = this.input.screenToWorld(0, this.renderer.height + 200).y;
+                    if (p.currentY > worldBottom) {
+                        p.state = 'WAITING';
+                        setTimeout(() => p.spawn(), conf.spawnDelay.min + Math.random()*(conf.spawnDelay.max-conf.spawnDelay.min));
+                    }
+                }
+            });
+
+            if (allPlaced) {
+                this.switchState(this.STATES.SETTLE);
+            }
+        }
+        else if (this.currentState === this.STATES.INTRO) {
+            // 平滑放大到 cutoutBox
+            const progress = Math.min(1, (performance.now() - this.stateStartTime) / this.config.animation.zoomIn);
+            // easeInOut
+            const ease = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
+            
+            // 目标中心点和缩放
+            const targetCenterX = this.cutoutBox.x + this.cutoutBox.width / 2 - this.renderer.width / 2;
+            const targetCenterY = this.cutoutBox.y + this.cutoutBox.height / 2 - this.renderer.height / 2;
+            
+            // 计算屏幕需要缩放多大才能包含整个 cutout，再加点边距
+            const scaleW = this.renderer.width / this.cutoutBox.width;
+            const scaleH = this.renderer.height / this.cutoutBox.height;
+            const targetScale = Math.min(scaleW, scaleH) * 0.8; // 留 20% 边距
+
+            this.renderer.camera.x = targetCenterX * ease;
+            this.renderer.camera.y = targetCenterY * ease;
+            this.renderer.camera.scale = 1 + (targetScale - 1) * ease;
+
+            if (progress >= 1) {
+                this.switchState(this.STATES.PLAY);
+            }
+        }
+        else if (this.currentState === this.STATES.SETTLE) {
+            // 平滑缩小回 1
+            const progress = Math.min(1, (performance.now() - this.stateStartTime) / this.config.animation.zoomOut);
+            const ease = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
+            
+            // 反向执行，这里假设 INTRO 结束时的 camera 状态是我们的起点
+            const startX = this.cutoutBox.x + this.cutoutBox.width / 2 - this.renderer.width / 2;
+            const startY = this.cutoutBox.y + this.cutoutBox.height / 2 - this.renderer.height / 2;
+            const scaleW = this.renderer.width / this.cutoutBox.width;
+            const scaleH = this.renderer.height / this.cutoutBox.height;
+            const startScale = Math.min(scaleW, scaleH) * 0.8;
+
+            this.renderer.camera.x = startX * (1 - ease);
+            this.renderer.camera.y = startY * (1 - ease);
+            this.renderer.camera.scale = startScale + (1 - startScale) * ease;
+        }
+    }
+
+    /**
+     * 主循环绘制
+     */
+    draw() {
+        this.renderer.clear();
+        this.renderer.applyCamera();
+
+        if (this.currentState === this.STATES.LOBBY) {
+            this.renderer.drawLobby(this.config.lobby.wallImage, this.config.levels, this.blurCache, 1);
+        }
+        else if (this.currentState >= this.STATES.INTRO && this.currentState <= this.STATES.SETTLE) {
+            const levelData = this.config.levels[this.currentLevelIndex];
+            let blurAlpha = 1;
+            
+            if (this.currentState === this.STATES.SETTLE) {
+                // 计算模糊消退
+                const timeSince = performance.now() - this.stateStartTime;
+                if (timeSince > this.config.animation.zoomOut) {
+                    blurAlpha = 1 - Math.min(1, (timeSince - this.config.animation.zoomOut) / this.config.animation.blurTransition);
+                }
+            }
+
+            this.renderer.drawGameBackground(levelData.image, this.blurCache[levelData.image], this.bgParams, blurAlpha);
+
+            // 如果不是结算完成状态，画边框
+            if (this.currentState !== this.STATES.SETTLE || blurAlpha > 0) {
+                this.renderer.drawCutoutBorder(this.cutoutBox);
+            }
+
+            // 画放置好的碎片 (它们带有自己的遮罩，所以实际上它们是清晰的)
+            const srcImg = this.renderer.getImage(levelData.image);
+            this.pieces.filter(p => p.state === 'PLACED').forEach(p => {
+                // 如果已经完全拼好且变清晰，可以不再单独渲染边框
+                const showEdge = blurAlpha > 0;
+                this.renderer.drawPiece(p, srcImg, this.bgParams, showEdge ? this.config.pieces : null);
+            });
+
+            // 画移动中或下落的碎片 (它们在顶层)
+            // 先画下落的，再画移动的，保证符合逻辑层级
+            this.pieces.filter(p => p.state === 'FALLING').forEach(p => {
+                this.renderer.drawPiece(p, srcImg, this.bgParams, this.config.pieces);
+            });
+            // 移动中的排序渲染 (高 zIndex 在上)
+            this.pieces.filter(p => p.state === 'MOVING')
+                .sort((a,b) => a.zIndex - b.zIndex)
+                .forEach(p => {
+                    this.renderer.drawPiece(p, srcImg, this.bgParams, this.config.pieces);
+                });
+        }
+        else if (this.currentState === this.STATES.END) {
+            // 结局幻灯片
+            const now = performance.now();
+            const elapsed = now - this.endingLastSlideTime;
+            
+            if (elapsed > this.config.ending.slideshowInterval && this.endingSlideIndex < this.config.levels.length) {
+                this.endingSlideIndex++;
+                this.endingLastSlideTime = now;
+            }
+
+            if (this.endingSlideIndex < this.config.levels.length) {
+                const levelData = this.config.levels[this.endingSlideIndex];
+                this.renderer.drawGameBackground(levelData.image, null, this.bgParams, 0); // 纯清晰
+                this.renderer.drawText(levelData.successText, this.renderer.width/2, this.renderer.height * 0.8, 24);
+            } else {
+                // 黑屏致谢
+                const fadeProgress = Math.min(1, (now - this.endingLastSlideTime) / this.config.ending.fadeToBlackDuration);
+                this.renderer.ctx.fillStyle = `rgba(0,0,0,${fadeProgress})`;
+                this.renderer.ctx.fillRect(-this.renderer.camera.x, -this.renderer.camera.y, this.renderer.width * 2, this.renderer.height * 2);
+                
+                if (fadeProgress >= 1) {
+                    this.config.ending.finalTexts.forEach((txt, i) => {
+                        this.renderer.drawText(txt, this.renderer.width/2, this.renderer.height/2 + i * 40 - 40, 24, 1);
+                    });
+                }
+            }
+        }
+
+        this.renderer.restoreCamera();
+
+        // 在 UI 层画文字，不需要缩放
+        if (this.currentState === this.STATES.SETTLE) {
+            const timeSince = performance.now() - this.stateStartTime;
+            if (timeSince > this.config.animation.zoomOut + this.config.animation.blurTransition) {
+                // 开始显示文案
+                const textTime = timeSince - (this.config.animation.zoomOut + this.config.animation.blurTransition);
+                let alpha = 0;
+                if (textTime < this.config.animation.textFadeIn) {
+                    alpha = textTime / this.config.animation.textFadeIn;
+                } else if (textTime < this.config.animation.textFadeIn + this.config.animation.textDuration) {
+                    alpha = 1;
+                } else {
+                    const fadeOutTime = textTime - (this.config.animation.textFadeIn + this.config.animation.textDuration);
+                    alpha = Math.max(0, 1 - fadeOutTime / this.config.animation.textFadeOut);
+                }
+                
+                const levelData = this.config.levels[this.currentLevelIndex];
+                this.renderer.drawText(levelData.successText, this.renderer.width/2, this.renderer.height * 0.2, 28, alpha);
+                
+                // 提示下一关
+                if (alpha > 0.5 && textTime > this.config.animation.textFadeIn) {
+                    this.renderer.drawText(this.config.ui.nextLevelPrompt, this.renderer.width/2, this.renderer.height * 0.9, 18, alpha);
+                }
+            }
+        }
+    }
+
+    loop(time) {
+        try {
+            const dt = time - this.lastTime;
+            this.lastTime = time;
+            
+            this.update(dt);
+            this.draw();
+            
+            requestAnimationFrame((t) => this.loop(t));
+        } catch (error) {
+            console.error(error);
+            document.getElementById('uiLayer').innerText = this.config.ui.errorPrompt;
+        }
+    }
+}
+
+// 页面加载完成后自动启动
+window.addEventListener('DOMContentLoaded', () => {
+    new GameCore();
+});
