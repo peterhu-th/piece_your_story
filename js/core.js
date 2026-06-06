@@ -37,6 +37,7 @@ class GameCore {
         this.lastTime = performance.now();
         
         this.stateStartTime = 0; // 记录状态切换的时间点，用于动画过渡
+        this.isSpawning = false; // 控制是否正在等待生成新碎片
         
         // 终局动画专用
         this.endingSlideIndex = 0;
@@ -91,8 +92,14 @@ class GameCore {
             this.prepareLevel(this.config.levels[this.currentLevelIndex]);
         }
         else if (newState === this.STATES.PLAY) {
-            // 碎片开始移动
-            this.pieces.forEach(p => p.spawn());
+            // 初次随机挑选几个直接 spawn
+            const waitingPieces = this.pieces.filter(p => p.state === 'WAITING');
+            waitingPieces.sort(() => Math.random() - 0.5);
+            const initialCount = Math.min(waitingPieces.length, this.config.pieces.maxConcurrentPieces);
+            for(let i=0; i<initialCount; i++) {
+                waitingPieces[i].spawn();
+            }
+            this.isSpawning = false;
         }
         else if (newState === this.STATES.SETTLE) {
             // 保存进度
@@ -110,8 +117,8 @@ class GameCore {
      */
     prepareLevel(levelData) {
         const img = this.renderer.getImage(levelData.image);
-        // 先计算一次全图显示的参数，以便获得 bgW, bgH, bgX, bgY
-        this.bgParams = this.renderer.getCoverDrawParams(img.width, img.height, this.renderer.width, this.renderer.height);
+        // 先计算一次全图显示的参数，以便获得 bgW, bgH, bgX, bgY (现在统一使用 Contain)
+        this.bgParams = this.renderer.getContainDrawParams(img.width, img.height, this.renderer.width, this.renderer.height);
         
         // 计算挖空区域 (Cutout) 在屏幕上的真实包围盒
         this.cutoutBox = {
@@ -195,7 +202,9 @@ class GameCore {
                 const worldPosRight = this.input.screenToWorld(this.renderer.width + 100, trackY);
 
                 p.state = 'MOVING';
-                p.currentY = worldPosLeft.y;
+                // 确保移动轨道始终位于目标区域的上方，保证落下时经过原位置
+                const safeY = Math.min(worldPosLeft.y, this.cutoutBox.y - p.height - 20);
+                p.currentY = safeY;
                 if (isLeft) {
                     p.currentX = worldPosRight.x;
                     p.speedX = -speed / this.renderer.camera.scale;
@@ -265,13 +274,11 @@ class GameCore {
                     const worldPosLeft = this.input.screenToWorld(-p.width - 100, 0);
                     const worldPosRight = this.input.screenToWorld(this.renderer.width + 100, 0);
 
-                    // 飞出屏幕则重生
+                    // 飞出屏幕则状态重置
                     if (p.speedX > 0 && p.currentX > worldPosRight.x) {
                         p.state = 'WAITING';
-                        setTimeout(() => p.spawn(), conf.spawnDelay.min + Math.random()*(conf.spawnDelay.max-conf.spawnDelay.min));
                     } else if (p.speedX < 0 && p.currentX < worldPosLeft.x) {
                         p.state = 'WAITING';
-                        setTimeout(() => p.spawn(), conf.spawnDelay.min + Math.random()*(conf.spawnDelay.max-conf.spawnDelay.min));
                     }
                 } 
                 else if (p.state === 'FALLING') {
@@ -295,10 +302,26 @@ class GameCore {
                     const worldBottom = this.input.screenToWorld(0, this.renderer.height + 200).y;
                     if (p.currentY > worldBottom) {
                         p.state = 'WAITING';
-                        setTimeout(() => p.spawn(), conf.spawnDelay.min + Math.random()*(conf.spawnDelay.max-conf.spawnDelay.min));
                     }
                 }
             });
+
+            // 集中生成逻辑：补充空缺的活跃图块
+            const movingCount = this.pieces.filter(p => p.state === 'MOVING' || p.state === 'FALLING').length;
+            if (movingCount < conf.maxConcurrentPieces && !this.isSpawning) {
+                const waitingPieces = this.pieces.filter(p => p.state === 'WAITING');
+                if (waitingPieces.length > 0) {
+                    this.isSpawning = true;
+                    setTimeout(() => {
+                        const currentWaiting = this.pieces.filter(p => p.state === 'WAITING');
+                        if (currentWaiting.length > 0 && this.currentState === this.STATES.PLAY) {
+                            const toSpawn = currentWaiting[Math.floor(Math.random() * currentWaiting.length)];
+                            toSpawn.spawn();
+                        }
+                        this.isSpawning = false;
+                    }, conf.spawnDelay.min + Math.random()*(conf.spawnDelay.max-conf.spawnDelay.min));
+                }
+            }
 
             if (allPlaced) {
                 this.switchState(this.STATES.SETTLE);
@@ -314,10 +337,10 @@ class GameCore {
             const targetCenterX = this.cutoutBox.x + this.cutoutBox.width / 2 - this.renderer.width / 2;
             const targetCenterY = this.cutoutBox.y + this.cutoutBox.height / 2 - this.renderer.height / 2;
             
-            // 计算屏幕需要缩放多大才能包含整个 cutout，再加点边距
+            // 计算屏幕需要缩放多大才能包含整个 cutout，为了看清周围内容，不要过度放大
             const scaleW = this.renderer.width / this.cutoutBox.width;
             const scaleH = this.renderer.height / this.cutoutBox.height;
-            const targetScale = Math.min(scaleW, scaleH) * 0.8; // 留 20% 边距
+            const targetScale = Math.min(Math.min(scaleW, scaleH) * 0.45, 1.8); // 留较多边距，最高放大1.8倍
 
             this.renderer.camera.x = targetCenterX * ease;
             this.renderer.camera.y = targetCenterY * ease;
@@ -337,7 +360,7 @@ class GameCore {
             const startY = this.cutoutBox.y + this.cutoutBox.height / 2 - this.renderer.height / 2;
             const scaleW = this.renderer.width / this.cutoutBox.width;
             const scaleH = this.renderer.height / this.cutoutBox.height;
-            const startScale = Math.min(scaleW, scaleH) * 0.8;
+            const startScale = Math.min(Math.min(scaleW, scaleH) * 0.45, 1.8);
 
             this.renderer.camera.x = startX * (1 - ease);
             this.renderer.camera.y = startY * (1 - ease);

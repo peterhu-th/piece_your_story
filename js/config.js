@@ -9,7 +9,7 @@ const GameConfig = {
     // ==========================================
     core: {
         fps: 60,                        // 目标帧率
-        snapTolerance: 20,              // 判定吸附的容错距离（像素），数值越大越容易吸附
+        snapTolerance: 50,              // 判定吸附的容错距离（像素），数值越大越容易吸附
         overlapZIndexStrategy: 'highest', // 多碎片重叠时，点击判定的层级策略：'highest' 为最上层优先
         blurRadius: 10                  // 挖空区域的模糊滤镜半径 (px)
     },
@@ -19,12 +19,13 @@ const GameConfig = {
     // ==========================================
     pieces: {
         // 碎片在屏幕上方作为选项时的状态
+        maxConcurrentPieces: 4,             // 同一时刻出现的图块数量上限
         speedRange: { min: 2.0, max: 5.5 }, // 移动速度的随机区间 (像素/帧)
         directionProb: 0.5,                 // 生成方向概率 (0.5 = 50%向左，50%向右)
-        spawnDelay: { min: 600, max: 1500 }, // 碎片掉落出界后，重新在上方生成的延迟随机区间(ms)
+        spawnDelay: { min: 600, max: 1500 }, // 碎片生成间隔(ms)
         
         // 碎片在上方移动时的Y轴轨道设定 (使用屏幕高度的百分比，适配不同手机)
-        yPositionTracks: [0.08, 0.15, 0.22], 
+        yPositionTracks: [0.05, 0.12, 0.18], 
         
         // 物理掉落
         fallAcceleration: 0.25,             // 碎片被点击后的垂直下落重力加速度
@@ -59,40 +60,40 @@ const GameConfig = {
             id: 1,
             image: "./images/1.png", 
             // 在大厅 wall.png 上的画框坐标百分比和宽高比例（基于 wall 图片自身的宽高）
-            lobbyFrameRect: { x: 0.10, y: 0.16, width: 0.35, height: 0.28 },
+            lobbyFrameRect: { x: 0.08, y: 0.15, width: 0.42, height: 0.30 },
             // 目标区域：海边小屋（避开左下角小孩）
-            cutoutBoundary: { x: 0.45, y: 0.50, width: 0.45, height: 0.35 },
-            grid: { cols: 3, rows: 3 }, // 房屋区域近似方形，采用 3x3 切割
+            cutoutBoundary: { x: 0.45, y: 0.50, width: 0.40, height: 0.224 },
+            grid: { cols: 2, rows: 2 }, // 4块 (2x2)
             shapeTemplate: "classic_jigsaw", // 使用凹凸经典拼图模板
             successText: "夕阳的余晖，拼凑出今天的温柔。"
         },
         {
             id: 2,
             image: "./images/2.png",
-            lobbyFrameRect: { x: 0.51, y: 0.26, width: 0.37, height: 0.22 },
+            lobbyFrameRect: { x: 0.51, y: 0.24, width: 0.38, height: 0.25 },
             // 目标区域：小孩与墓碑 (中央偏下)
-            cutoutBoundary: { x: 0.40, y: 0.55, width: 0.25, height: 0.20 },
-            grid: { cols: 3, rows: 2 }, // 区域较小且偏宽，采用 3x2 切割
+            cutoutBoundary: { x: 0.40, y: 0.55, width: 0.45, height: 0.168 },
+            grid: { cols: 3, rows: 2 }, // 6块 (3x2)
             shapeTemplate: "classic_jigsaw",
             successText: "微风拂过水面，带走岁月的尘埃。"
         },
         {
             id: 3,
             image: "./images/3.png",
-            lobbyFrameRect: { x: 0.10, y: 0.51, width: 0.32, height: 0.30 },
+            lobbyFrameRect: { x: 0.08, y: 0.51, width: 0.38, height: 0.30 },
             // 目标区域：巨大的桥拱 (左上方)
-            cutoutBoundary: { x: 0.05, y: 0.10, width: 0.40, height: 0.60 },
-            grid: { cols: 2, rows: 4 }, // 狭长区域，采用 2x4 切割
+            cutoutBoundary: { x: 0.05, y: 0.10, width: 0.35, height: 0.29 },
+            grid: { cols: 2, rows: 3 }, // 6块 (2x3)
             shapeTemplate: "classic_jigsaw",
             successText: "巨大的桥拱，连接着昨日与今朝。"
         },
         {
             id: 4,
             image: "./images/4.png",
-            lobbyFrameRect: { x: 0.49, y: 0.55, width: 0.39, height: 0.31 },
+            lobbyFrameRect: { x: 0.48, y: 0.54, width: 0.41, height: 0.32 },
             // 目标区域：街道、灯光与栏杆 (右下角)
-            cutoutBoundary: { x: 0.50, y: 0.60, width: 0.50, height: 0.40 },
-            grid: { cols: 4, rows: 2 }, // 宽扁区域，采用 4x2 切割
+            cutoutBoundary: { x: 0.40, y: 0.60, width: 0.60, height: 0.168 },
+            grid: { cols: 4, rows: 2 }, // 8块 (4x2)
             shapeTemplate: "classic_jigsaw",
             successText: "华灯初上，照亮归家的小径。"
         }

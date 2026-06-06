@@ -103,7 +103,7 @@ class Renderer {
     }
 
     /**
-     * 辅助绘制：基于 cover 模式计算图片的绘制参数
+     * 辅助绘制：基于 cover 模式计算图片的绘制参数 (填充)
      */
     getCoverDrawParams(imgWidth, imgHeight, targetWidth, targetHeight, targetX = 0, targetY = 0) {
         const scale = Math.max(targetWidth / imgWidth, targetHeight / imgHeight);
@@ -115,7 +115,20 @@ class Renderer {
     }
 
     /**
+     * 辅助绘制：基于 contain 模式计算图片的绘制参数 (完整显示)
+     */
+    getContainDrawParams(imgWidth, imgHeight, targetWidth, targetHeight, targetX = 0, targetY = 0) {
+        const scale = Math.min(targetWidth / imgWidth, targetHeight / imgHeight);
+        const w = imgWidth * scale;
+        const h = imgHeight * scale;
+        const x = targetX + (targetWidth - w) / 2;
+        const y = targetY + (targetHeight - h) / 2;
+        return { x, y, w, h, scale };
+    }
+
+    /**
      * 在大厅墙壁上绘制关卡画框和模糊预览图
+     * 使用预合成 (Pre-composition) 策略保证对齐
      */
     drawLobby(wallImgSrc, levelsData, blurImagesCache, globalAlpha = 1) {
         if (globalAlpha < 1) {
@@ -125,35 +138,49 @@ class Renderer {
         const wallImg = this.getImage(wallImgSrc);
         if (!wallImg) return;
 
-        // Cover 模式绘制墙壁
-        const params = this.getCoverDrawParams(wallImg.width, wallImg.height, this.width, this.height);
-        this.ctx.drawImage(wallImg, params.x, params.y, params.w, params.h);
+        // 预合成
+        if (!this.lobbyCanvas) {
+            this.lobbyCanvas = document.createElement('canvas');
+            this.lobbyCanvas.width = wallImg.width;
+            this.lobbyCanvas.height = wallImg.height;
+            const lctx = this.lobbyCanvas.getContext('2d');
+            
+            lctx.drawImage(wallImg, 0, 0);
 
-        // 绘制墙壁上的 4 个画框位置里的模糊图
-        for (const level of levelsData) {
-            const rect = level.lobbyFrameRect;
-            const drawX = params.x + rect.x * params.w;
-            const drawY = params.y + rect.y * params.h;
-            const drawW = rect.width * params.w;
-            const drawH = rect.height * params.h;
+            for (const level of levelsData) {
+                const rect = level.lobbyFrameRect;
+                const drawX = rect.x * wallImg.width;
+                const drawY = rect.y * wallImg.height;
+                const drawW = rect.width * wallImg.width;
+                const drawH = rect.height * wallImg.height;
 
-            const blurImg = blurImagesCache[level.image];
-            if (blurImg) {
-                // 将模糊图片自适应放入画框中
-                const bParams = this.getCoverDrawParams(blurImg.width, blurImg.height, drawW, drawH, drawX, drawY);
-                this.ctx.save();
-                this.ctx.beginPath();
-                this.ctx.rect(drawX, drawY, drawW, drawH);
-                this.ctx.clip(); // 限制在画框内
-                this.ctx.drawImage(blurImg, bParams.x, bParams.y, bParams.w, bParams.h);
-                
-                // 给画框加个内发光/阴影增加质感
-                this.ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-                this.ctx.lineWidth = 4;
-                this.ctx.strokeRect(drawX, drawY, drawW, drawH);
-                this.ctx.restore();
+                const blurImg = blurImagesCache[level.image];
+                if (blurImg) {
+                    lctx.save();
+                    lctx.beginPath();
+                    lctx.rect(drawX, drawY, drawW, drawH);
+                    lctx.clip(); 
+                    
+                    const scale = Math.max(drawW / blurImg.width, drawH / blurImg.height);
+                    const bw = blurImg.width * scale;
+                    const bh = blurImg.height * scale;
+                    const bx = drawX + (drawW - bw) / 2;
+                    const by = drawY + (drawH - bh) / 2;
+                    
+                    lctx.drawImage(blurImg, bx, by, bw, bh);
+                    
+                    lctx.strokeStyle = 'rgba(0,0,0,0.5)';
+                    lctx.lineWidth = 4;
+                    lctx.strokeRect(drawX, drawY, drawW, drawH);
+                    lctx.restore();
+                }
             }
         }
+
+        // Contain 模式完整显示
+        const params = this.getContainDrawParams(this.lobbyCanvas.width, this.lobbyCanvas.height, this.width, this.height);
+        this.ctx.drawImage(this.lobbyCanvas, params.x, params.y, params.w, params.h);
+
         this.ctx.globalAlpha = 1;
     }
 
@@ -164,7 +191,7 @@ class Renderer {
         const clearImg = this.getImage(clearImgSrc);
         if (!clearImg) return;
         
-        const params = this.getCoverDrawParams(clearImg.width, clearImg.height, this.width, this.height);
+        const params = this.getContainDrawParams(clearImg.width, clearImg.height, this.width, this.height);
         
         // 渲染清晰底图
         this.ctx.drawImage(clearImg, params.x, params.y, params.w, params.h);
