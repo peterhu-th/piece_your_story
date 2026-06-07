@@ -39,7 +39,7 @@ const GameConfig = {
         // 拖拽模式专属配置
         dragMode: {
             backgroundImage: "./resources/images/piece.png",
-            frameRect: { x: 0.2051, y: 0.1715, width: 0.5915, height: 0.5366 }, // 相框在 piece.png 上的相对坐标，可根据实际底图调整
+            frameRect: { x: 0.2005, y: 0.1695, width: 0.5975, height: 0.5405 }, // 相框在 piece.png 上的相对坐标，精确贴合内边框防透底
             scatterAreaY: { min: 0.65, max: 0.95 }, // 碎片在 piece.png 上的散落区域 Y 比例（相框下方）
             scatterRotation: { min: -15, max: 15 }, // 散落时的随机旋转角度
             returnSpeed: 0.15                       // 松手后飞回原位的插值系数
@@ -64,15 +64,6 @@ const GameConfig = {
         drum: "./resources/audio/drum.mp3"
     },
 
-    // ==========================================
-    // 4. UI 提示与文案
-    // ==========================================
-    ui: {
-        clickToStart: "点击画面开始",
-        nextLevelPrompt: "点击任意处继续",
-        endText: "The End",
-        errorPrompt: "哎呀，出错了，请重启试试吧~"
-    },
 
     // ==========================================
     // 5. 大厅与关卡剧本数据 (核心裁剪与文案配置)
@@ -94,9 +85,7 @@ const GameConfig = {
             grid: { cols: 2, rows: 2 }, // 七巧板其实不需要grid，但这保留备用
             shapeTemplate: "tangram", // 第一张使用七巧板
             playMode: "drag", // 使用拖拽模式
-            targetTime: 40, // 三星评价目标时间（秒）
-            targetMoves: 12, // 三星评价目标步数
-            successWordImage: "./resources/words/word1.jpg"
+            successWordImage: "./resources/words/word1.png"
         },
         {
             id: 2,
@@ -107,9 +96,7 @@ const GameConfig = {
             grid: { cols: 3, rows: 2 }, // 6块 (3x2)
             shapeTemplate: "classic_jigsaw",
             playMode: "timing", // 使用时机掉落模式
-            targetTime: 30,
-            targetMoves: 10,
-            successWordImage: "./resources/words/word2.jpg"
+            successWordImage: "./resources/words/word2.png"
         },
         {
             id: 3,
@@ -120,9 +107,7 @@ const GameConfig = {
             grid: { cols: 2, rows: 3 }, // 6块 (2x3)
             shapeTemplate: "classic_jigsaw",
             playMode: "drag", // 使用时机掉落模式
-            targetTime: 30,
-            targetMoves: 10,
-            successWordImage: "./resources/words/word3.jpg"
+            successWordImage: "./resources/words/word3.png"
         },
         {
             id: 4,
@@ -130,13 +115,11 @@ const GameConfig = {
             lobbyFrameRect: { x: 0.54, y: 0.55, width: 0.345, height: 0.30 },
             // 目标区域：全屏扣掉
             cutoutBoundary: { x: 0.0, y: 0.0, width: 1.0, height: 1.0 },
-            grid: { cols: 4, rows: 3 }, // 12块 (4x3)
+            grid: { cols: 3, rows: 5 }, // 15块 (3x5)，比例约为 0.6，使图块接近正方形以修复畸变
             shapeTemplate: "classic_jigsaw",
             playMode: "drag", // 使用拖拽模式
             noRotation: true, // 不允许倾斜
-            targetTime: 50,
-            targetMoves: 20,
-            successWordImage: "./resources/words/word4.jpg"
+            successWordImage: "./resources/words/word4.png"
         }
     ],
 
@@ -146,7 +129,7 @@ const GameConfig = {
     ending: {
         slideshowInterval: 3500,      // 结局时，每张图片轮播展示的间隔时长(ms)
         fadeToBlackDuration: 2500,    // 最后屏幕逐渐变黑的过渡时长(ms)
-        finalImage: "./resources/words/word5.jpg"
+        finalImage: "./resources/words/word5.png"
     },
     
     ui: {

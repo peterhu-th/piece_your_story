@@ -27,7 +27,7 @@ class GameCore {
         // 关卡进度（按照用户要求，刷新页面重置状态，不再读取 localStorage）
         this.currentLevelIndex = 0;
         this.viewingLevelIndex = 0;
-        this.totalPlayTime = 0;
+        this.viewingLevelIndex = 0;
 
         // 运行时数据
         this.blurCache = {}; // 缓存每关模糊图
@@ -44,7 +44,7 @@ class GameCore {
         this.endingLastSlideTime = 0;
 
         // 星级与游玩数据记录
-        this.currentMoves = 0;
+        // 竞技元素（星级与时间）已移除
         
         // 雨滴粒子系统
         this.rainParticles = [];
@@ -131,7 +131,6 @@ class GameCore {
             }
         }
         else if (newState === this.STATES.PLAY) {
-            this.currentMoves = 0;
 
             const waitingPieces = this.pieces.filter(p => p.state === 'WAITING');
             waitingPieces.sort(() => Math.random() - 0.5);
@@ -369,7 +368,6 @@ class GameCore {
             if (this.draggedPiece) {
                 const p = this.draggedPiece;
                 this.draggedPiece = null;
-                this.currentMoves++; // 记录一次拖放步数
                 
                 const dist = Math.hypot(p.currentX - p.targetX, p.currentY - p.targetY);
                 if (dist <= this.config.core.snapTolerance * 2) {
@@ -411,7 +409,6 @@ class GameCore {
                     target.state = 'FALLING';
                     target.speedX = 0;
                     target.speedY = 0;
-                    this.currentMoves++; // 记录一次点击步数
                 }
             }
         }
@@ -449,23 +446,51 @@ class GameCore {
             return;
         }
         else if (this.currentState === this.STATES.VIEW_COMPLETED) {
-            if (worldY > this.renderer.height - 60) {
+            const btnW = 140;
+            const btnH = 44;
+            const gap = 30;
+            const centerY = this.renderer.height - 50;
+            
+            const backX = this.renderer.width / 2 - gap / 2 - btnW / 2;
+            const exportX = this.renderer.width / 2 + gap / 2 + btnW / 2;
+            
+            // 返回主页按钮判定
+            if (Math.abs(worldX - backX) <= btnW / 2 && Math.abs(worldY - centerY) <= btnH / 2) {
                 this.switchState(this.STATES.LOBBY);
                 return;
             }
-            
-            const levelData = this.config.levels[this.viewingLevelIndex];
-            this.exportCompletedImage(levelData);
+            // 导出图片按钮判定
+            else if (Math.abs(worldX - exportX) <= btnW / 2 && Math.abs(worldY - centerY) <= btnH / 2) {
+                const levelData = this.config.levels[this.viewingLevelIndex];
+                this.exportCompletedImage(levelData);
+            }
         }
         else if (this.currentState === this.STATES.SETTLE) {
             // Settle 结束且提示文字展示完毕后，点击进入下一关或结局
             const timeSince = performance.now() - this.stateStartTime;
-            if (timeSince > this.config.animation.zoomOut + this.config.animation.blurTransition + this.config.animation.textFadeIn + 1000) {
-                this.currentLevelIndex++;
-                if (this.currentLevelIndex < this.config.levels.length) {
-                    this.switchState(this.STATES.LOBBY); // 回退到大厅
-                } else {
-                    this.switchState(this.STATES.END);
+            if (timeSince > this.config.animation.zoomOut + this.config.animation.blurTransition + this.config.animation.textFadeIn) {
+                const btnW = 140;
+                const btnH = 44;
+                const gap = 30;
+                const centerY = this.renderer.height - 50;
+                
+                const backX = this.renderer.width / 2 - gap / 2 - btnW / 2;
+                const exportX = this.renderer.width / 2 + gap / 2 + btnW / 2;
+                
+                // 返回主页按钮判定
+                if (Math.abs(worldX - backX) <= btnW / 2 && Math.abs(worldY - centerY) <= btnH / 2) {
+                    this.currentLevelIndex++;
+                    if (this.currentLevelIndex < this.config.levels.length) {
+                        this.switchState(this.STATES.LOBBY); // 回退到大厅
+                    } else {
+                        this.switchState(this.STATES.END);
+                    }
+                    return;
+                }
+                // 导出图片按钮判定
+                else if (Math.abs(worldX - exportX) <= btnW / 2 && Math.abs(worldY - centerY) <= btnH / 2) {
+                    const levelData = this.config.levels[this.currentLevelIndex];
+                    this.exportCompletedImage(levelData);
                 }
             }
         }
@@ -519,9 +544,16 @@ class GameCore {
         link.click();
         document.body.removeChild(link);
         
+        this.showToast('图片已开始导出');
+    }
+
+    /**
+     * 弹窗提示
+     */
+    showToast(message) {
         const toast = document.getElementById('toast');
         if (toast) {
-            toast.textContent = '图片已开始导出';
+            toast.textContent = message;
             toast.classList.add('show');
             setTimeout(() => toast.classList.remove('show'), 2000);
         }
@@ -780,14 +812,7 @@ class GameCore {
 
             // 如果处于游玩状态，绘制 UI 进度条
             if (this.currentState === this.STATES.PLAY) {
-                this.renderer.restoreCamera(); // 【修复】：绘制 UI 前必须先恢复屏幕原本坐标系
-
-                const totalPieces = this.pieces.length;
-                const placedPieces = this.pieces.filter(p => p.state === 'PLACED').length;
-                const maxMoves = this.config.levels[this.currentLevelIndex].targetMoves || 10;
-                this.renderer.drawProgressBar(placedPieces, totalPieces, this.currentMoves, maxMoves);
-
-                this.renderer.applyCamera();   // 恢复相机转换，以免影响后面代码
+                // UI 进度条已移除
             }
         }
         else if (this.currentState === this.STATES.END) {
@@ -879,26 +904,55 @@ class GameCore {
                 if (wordImg) {
                     this.renderer.ctx.save();
                     this.renderer.ctx.globalAlpha = fadeAlpha;
-                    this.renderer.ctx.globalCompositeOperation = 'multiply';
+                    this.renderer.ctx.globalCompositeOperation = 'source-over';
                     
-                    // 将文字图片按照一定比例（如宽度的70%）居中叠加
-                    const targetW = this.bgParams.w * 0.7;
-                    const scale = targetW / wordImg.width;
+                    // 确定文本的可用区域 (框)
+                    let boxX = this.bgParams.x;
+                    let boxY = this.bgParams.y;
+                    let boxW = this.bgParams.w;
+                    let boxH = this.bgParams.h;
+
+                    // 在 VIEW_COMPLETED 状态下，背景是原图，本身就是框。
+                    // 留白 15% 确保文字完全处于框内
+                    const maxW = boxW * 0.85;
+                    const maxH = boxH * 0.85;
+
+                    const scale = Math.min(maxW / wordImg.width, maxH / wordImg.height);
+                    const targetW = wordImg.width * scale;
                     const targetH = wordImg.height * scale;
-                    const targetX = this.bgParams.x + (this.bgParams.w - targetW) / 2;
-                    const targetY = this.bgParams.y + (this.bgParams.h - targetH) / 2;
+                    const targetX = boxX + (boxW - targetW) / 2;
+                    const targetY = boxY + (boxH - targetH) / 2;
                     
                     this.renderer.ctx.drawImage(wordImg, targetX, targetY, targetW, targetH);
                     this.renderer.ctx.restore();
                 }
             }
 
-            // 绘制操作提示蒙版底色（只在底部）
-            this.renderer.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-            this.renderer.ctx.fillRect(0, this.renderer.height - 60, this.renderer.width, 60);
+            const btnW = 140;
+            const btnH = 44;
+            const gap = 30;
+            const centerY = this.renderer.height - 50;
+            
+            const backX = this.renderer.width / 2 - gap / 2 - btnW / 2;
+            const exportX = this.renderer.width / 2 + gap / 2 + btnW / 2;
 
-            // 绘制返回与保存提示
-            this.renderer.drawText('点击屏幕上方导出图片 | 点击底部区域返回大厅', this.renderer.width/2, this.renderer.height - 25, 16, 1);
+            this.renderer.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            this.renderer.ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+            this.renderer.ctx.lineWidth = 1;
+            
+            // 绘制返回主页按钮
+            this.renderer.ctx.beginPath();
+            this.renderer.ctx.roundRect(backX - btnW / 2, centerY - btnH / 2, btnW, btnH, 8);
+            this.renderer.ctx.fill();
+            this.renderer.ctx.stroke();
+            this.renderer.drawText('返回主页', backX, centerY + 2, 16, 1);
+
+            // 绘制导出图片按钮
+            this.renderer.ctx.beginPath();
+            this.renderer.ctx.roundRect(exportX - btnW / 2, centerY - btnH / 2, btnW, btnH, 8);
+            this.renderer.ctx.fill();
+            this.renderer.ctx.stroke();
+            this.renderer.drawText('导出图片', exportX, centerY + 2, 16, 1);
         }
 
         this.renderer.restoreCamera();
@@ -912,9 +966,71 @@ class GameCore {
                     ? txtTime / this.config.animation.textFadeIn 
                     : 1;
 
-                // 提示下一关
-                if (txtAlpha > 0.5 && txtTime > this.config.animation.textFadeIn) {
-                    this.renderer.drawText(this.config.ui.nextLevelPrompt, this.renderer.width/2, this.renderer.height * 0.9, 18, txtAlpha);
+                // 绘制成功文案图片 (successWordImage)
+                const levelData = this.config.levels[this.currentLevelIndex];
+                const wordImg = this.renderer.getImage(levelData.successWordImage);
+                if (wordImg) {
+                    this.renderer.ctx.save();
+                    this.renderer.ctx.globalAlpha = txtAlpha;
+                    this.renderer.ctx.globalCompositeOperation = 'source-over';
+                    
+                    // 确定文本的可用区域 (框)
+                    let boxX = this.bgParams.x;
+                    let boxY = this.bgParams.y;
+                    let boxW = this.bgParams.w;
+                    let boxH = this.bgParams.h;
+
+                    // 在 SETTLE 状态下，如果为 drag 模式，bgParams 对应的是带相框的桌布
+                    // 需要计算真实的相框区域
+                    if (levelData.playMode === 'drag') {
+                        const frameRect = this.config.core.dragMode.frameRect;
+                        boxX += this.bgParams.w * frameRect.x;
+                        boxY += this.bgParams.h * frameRect.y;
+                        boxW = this.bgParams.w * frameRect.width;
+                        boxH = this.bgParams.h * frameRect.height;
+                    }
+
+                    // 留白 15% 确保文字完全处于框内
+                    const maxW = boxW * 0.85;
+                    const maxH = boxH * 0.85;
+
+                    const scale = Math.min(maxW / wordImg.width, maxH / wordImg.height);
+                    const targetW = wordImg.width * scale;
+                    const targetH = wordImg.height * scale;
+                    const targetX = boxX + (boxW - targetW) / 2;
+                    const targetY = boxY + (boxH - targetH) / 2;
+                    
+                    this.renderer.ctx.drawImage(wordImg, targetX, targetY, targetW, targetH);
+                    this.renderer.ctx.restore();
+                }
+
+                // 动画显示完毕后，绘制返回与导出按钮
+                if (txtTime > this.config.animation.textFadeIn) {
+                    const btnW = 140;
+                    const btnH = 44;
+                    const gap = 30;
+                    const centerY = this.renderer.height - 50;
+                    
+                    const backX = this.renderer.width / 2 - gap / 2 - btnW / 2;
+                    const exportX = this.renderer.width / 2 + gap / 2 + btnW / 2;
+
+                    this.renderer.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                    this.renderer.ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                    this.renderer.ctx.lineWidth = 1;
+                    
+                    // 绘制返回主页按钮
+                    this.renderer.ctx.beginPath();
+                    this.renderer.ctx.roundRect(backX - btnW / 2, centerY - btnH / 2, btnW, btnH, 8);
+                    this.renderer.ctx.fill();
+                    this.renderer.ctx.stroke();
+                    this.renderer.drawText('返回主页', backX, centerY + 2, 16, 1);
+
+                    // 绘制导出图片按钮
+                    this.renderer.ctx.beginPath();
+                    this.renderer.ctx.roundRect(exportX - btnW / 2, centerY - btnH / 2, btnW, btnH, 8);
+                    this.renderer.ctx.fill();
+                    this.renderer.ctx.stroke();
+                    this.renderer.drawText('导出图片', exportX, centerY + 2, 16, 1);
                 }
             }
         }
