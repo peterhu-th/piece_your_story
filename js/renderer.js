@@ -306,13 +306,16 @@ class Renderer {
         if (!clearImg) return;
         
         // 渲染清晰底图
-        this.ctx.drawImage(clearImg, rect.x, rect.y, rect.width, rect.height);
+        // 【修复】：兼容 rect.w 和 rect.width
+        const w = rect.w !== undefined ? rect.w : rect.width;
+        const h = rect.h !== undefined ? rect.h : rect.height;
+        this.ctx.drawImage(clearImg, rect.x, rect.y, w, h);
         
         // 叠加模糊层
         if (blurAlpha > 0 && blurImg) {
             this.ctx.save();
             this.ctx.globalAlpha = blurAlpha;
-            this.ctx.drawImage(blurImg, rect.x, rect.y, rect.width, rect.height);
+            this.ctx.drawImage(blurImg, rect.x, rect.y, w, h);
             this.ctx.restore();
         }
     }

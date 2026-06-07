@@ -83,7 +83,12 @@ class GameCore {
             const imagePaths = [this.config.lobby.wallImage, this.config.pieces.dragMode.backgroundImage];
             this.config.levels.forEach(l => {
                 imagePaths.push(l.image);
+                if (l.successWordImage) imagePaths.push(l.successWordImage); 
             });
+
+            if (this.config.ending.finalImage) {
+                imagePaths.push(this.config.ending.finalImage);
+            }
 
             await this.renderer.loadImages(imagePaths);
             
@@ -708,7 +713,7 @@ class GameCore {
             return;
         }
         else if (this.currentState === this.STATES.LOBBY) {
-            this.renderer.drawLobby(this.config.lobby.wallImage, this.config.levels, this.blurCache, 1, this.currentLevelIndex, this.levelStars);
+            this.renderer.drawLobby(this.config.lobby.wallImage, this.config.levels, this.blurCache, 1, this.currentLevelIndex, []);
         }
         else if (this.currentState >= this.STATES.INTRO && this.currentState <= this.STATES.SETTLE) {
             const levelData = this.config.levels[this.currentLevelIndex];
@@ -800,7 +805,7 @@ class GameCore {
 
             if (elapsed < lobbyDuration) {
                 // 1. 回到大厅，全清晰，展示金色边框
-                this.renderer.drawLobby(this.config.lobby.wallImage, this.config.levels, this.blurCache, 1, this.config.levels.length, this.levelStars);
+                this.renderer.drawLobby(this.config.lobby.wallImage, this.config.levels, this.blurCache, 1, this.config.levels.length, []);
             } 
             else if (elapsed < startFadeToBlackTime) {
                 // 2. 依次展示每张图
@@ -902,28 +907,10 @@ class GameCore {
         if (this.currentState === this.STATES.SETTLE) {
             const timeSince = performance.now() - this.stateStartTime;
             if (timeSince > this.config.animation.zoomOut + this.config.animation.blurTransition) {
-                // 开始显示文案
                 const txtTime = timeSince - (this.config.animation.zoomOut + this.config.animation.blurTransition);
                 const txtAlpha = txtTime < this.config.animation.textFadeIn 
                     ? txtTime / this.config.animation.textFadeIn 
                     : 1;
-
-                this.renderer.drawLevelText({
-                    text: this.config.levels[this.currentLevelIndex].successText,
-                    x: this.renderer.width / 2,
-                    y: this.renderer.height * 0.2,
-                    alpha: txtAlpha
-                });
-
-                // 显示星星
-                const record = this.levelStars.find(s => s.id === this.config.levels[this.currentLevelIndex].id);
-                if (record) {
-                    let starText = "评价：";
-                    for(let i=0; i<3; i++) {
-                        starText += (i < record.stars) ? "★" : "☆";
-                    }
-                    this.renderer.drawText(starText, this.renderer.width/2, this.renderer.height * 0.8, 24, txtAlpha);
-                }
 
                 // 提示下一关
                 if (txtAlpha > 0.5 && txtTime > this.config.animation.textFadeIn) {
