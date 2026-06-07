@@ -91,8 +91,8 @@ const GameConfig = {
             id: 2,
             image: "./resources/images/2.png",
             lobbyFrameRect: { x: 0.56, y: 0.26, width: 0.30, height: 0.22 },
-            // 目标区域：小孩与墓碑 (中央偏下)
-            cutoutBoundary: { x: 0.30, y: 0.50, width: 0.675, height: 0.252 },
+            // 目标区域：小孩与墓碑 (中央居中)
+            cutoutBoundary: { x: 0.1625, y: 0.374, width: 0.675, height: 0.252 },
             grid: { cols: 3, rows: 2 }, // 6块 (3x2)
             shapeTemplate: "classic_jigsaw",
             playMode: "timing", // 使用时机掉落模式

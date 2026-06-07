@@ -465,6 +465,19 @@ class Renderer {
     drawLobbySpotlight(mouseX, mouseY, levelsData, currentLevelIndex, params, radiusRatio = 0.3, globalAlpha = 1) {
         if (globalAlpha <= 0) return;
 
+        // 如果是手机端（未发生交互前坐标为初始值），直接照亮当前进度照片
+        if (mouseX <= -900 && mouseY <= -900) {
+            const currentLevel = levelsData[currentLevelIndex];
+            if (currentLevel) {
+                const rect = currentLevel.lobbyFrameRect;
+                mouseX = params.x + (rect.x + rect.width / 2) * params.w;
+                mouseY = params.y + (rect.y + rect.height / 2) * params.h;
+            } else {
+                mouseX = this.width / 2;
+                mouseY = this.height / 2;
+            }
+        }
+
         // 初始化或调整离屏黑幕画布的大小
         if (!this.darkCanvas || this.darkCanvas.width !== this.width || this.darkCanvas.height !== this.height) {
             if (!this.darkCanvas) this.darkCanvas = document.createElement('canvas');

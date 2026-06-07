@@ -501,8 +501,7 @@ class GameCore {
             const startFadeToBlackTime = lobbyDuration + this.config.levels.length * singleImageDuration;
             
             if (timeSince > startFadeToBlackTime + this.config.ending.fadeToBlackDuration) {
-                // 回到大厅重新游玩，不清除星级记录
-                this.currentLevelIndex = 0;
+                // 回到大厅重新游玩，保持全部解锁状态
                 this.switchState(this.STATES.LOBBY);
             }
         }
@@ -871,7 +870,7 @@ class GameCore {
                         const targetX = boxX + (boxW - targetW) / 2;
                         let targetY = boxY + (boxH - targetH) / 2;
                         
-                        if (levelData.id === 4) {
+                        if (levelData.id === 4 || levelData.id === 1) {
                             targetY -= boxH / 4;
                         }
                         
@@ -957,7 +956,7 @@ class GameCore {
                     const targetX = boxX + (boxW - targetW) / 2;
                     let targetY = boxY + (boxH - targetH) / 2;
                     
-                    if (levelData.id === 4) {
+                    if (levelData.id === 4 || levelData.id === 1) {
                         targetY -= boxH / 4;
                     }
                     
@@ -1038,7 +1037,7 @@ class GameCore {
                     const targetX = boxX + (boxW - targetW) / 2;
                     let targetY = boxY + (boxH - targetH) / 2;
                     
-                    if (levelData.id === 4) {
+                    if (levelData.id === 4 || levelData.id === 1) {
                         targetY -= boxH / 4;
                     }
                     
