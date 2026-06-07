@@ -563,7 +563,9 @@ class Renderer {
         
         // 游戏标题
         this.ctx.fillStyle = '#fff';
-        this.ctx.font = 'bold 56px sans-serif';
+        // 动态计算字体大小，防止在小屏幕上溢出
+        const titleFontSize = Math.min(56, this.width * 0.12);
+        this.ctx.font = `bold ${titleFontSize}px sans-serif`;
         this.ctx.shadowColor = 'rgba(0,0,0,0.8)';
         this.ctx.shadowBlur = 10;
         this.ctx.fillText("Piece Your Story", this.width / 2, this.height * 0.4);
@@ -571,7 +573,8 @@ class Renderer {
         // 开始提示
         const alpha = (Math.sin(Date.now() / 300) + 1) / 2 * 0.5 + 0.3; // 呼吸闪烁
         this.ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-        this.ctx.font = '24px sans-serif';
+        const promptFontSize = Math.min(24, this.width * 0.06);
+        this.ctx.font = `${promptFontSize}px sans-serif`;
         this.ctx.fillText("点击任意处开始游戏", this.width / 2, this.height * 0.7);
         
         this.ctx.restore();
