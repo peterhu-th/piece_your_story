@@ -70,7 +70,7 @@ const GameConfig = {
     // ==========================================
     lobby: {
         wallImage: "./resources/images/wall.png",
-        allowFreeSelection: true, // 设置为 true 允许玩家点击任意未解锁画作
+        allowFreeSelection: false, // 设置为 true 允许玩家点击任意未解锁画作
         spotlightRadiusRatio: 0.25 // 鼠标探照灯及发光画作的光照半径系数（基于屏幕最大边）
     },
 
@@ -102,8 +102,8 @@ const GameConfig = {
             id: 3,
             image: "./resources/images/3.png",
             lobbyFrameRect: { x: 0.11, y: 0.51, width: 0.35, height: 0.30 },
-            // 目标区域：巨大的桥拱 (左上方)
-            cutoutBoundary: { x: 0.05, y: 0.10, width: 0.35, height: 0.29 },
+            // 目标区域：巨大的桥拱 (左上方)，增大50%
+            cutoutBoundary: { x: 0.05, y: 0.10, width: 0.525, height: 0.435 },
             grid: { cols: 2, rows: 3 }, // 6块 (2x3)
             shapeTemplate: "classic_jigsaw",
             playMode: "drag", // 使用时机掉落模式

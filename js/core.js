@@ -564,7 +564,7 @@ class GameCore {
      */
     update(dt) {
         // 更新光标样式
-        if (this.currentState === this.STATES.LOBBY) {
+        if (this.currentState === this.STATES.LOBBY && this.currentLevelIndex < this.config.levels.length) {
             this.renderer.canvas.style.cursor = 'none';
         } else {
             this.renderer.canvas.style.cursor = 'default';
@@ -853,13 +853,27 @@ class GameCore {
                     if (wordImg) {
                         this.renderer.ctx.save();
                         this.renderer.ctx.globalAlpha = alpha;
-                        this.renderer.ctx.globalCompositeOperation = 'multiply';
+                        this.renderer.ctx.globalCompositeOperation = 'source-over';
                         
-                        const targetW = this.bgParams.w * 0.7;
-                        const scale = targetW / wordImg.width;
+                        // 确定文本的可用区域 (框)
+                        let boxX = this.bgParams.x;
+                        let boxY = this.bgParams.y;
+                        let boxW = this.bgParams.w;
+                        let boxH = this.bgParams.h;
+
+                        // 留白 15% 确保文字完全处于框内
+                        const maxW = boxW * 0.85;
+                        const maxH = boxH * 0.85;
+
+                        const scale = Math.min(maxW / wordImg.width, maxH / wordImg.height);
+                        const targetW = wordImg.width * scale;
                         const targetH = wordImg.height * scale;
-                        const targetX = this.bgParams.x + (this.bgParams.w - targetW) / 2;
-                        const targetY = this.bgParams.y + (this.bgParams.h - targetH) / 2;
+                        const targetX = boxX + (boxW - targetW) / 2;
+                        let targetY = boxY + (boxH - targetH) / 2;
+                        
+                        if (levelData.id === 4) {
+                            targetY -= boxH / 4;
+                        }
                         
                         this.renderer.ctx.drawImage(wordImg, targetX, targetY, targetW, targetH);
                         this.renderer.ctx.restore();
@@ -880,10 +894,30 @@ class GameCore {
                     const finalImg = this.renderer.getImage(this.config.ending.finalImage);
                     if (finalImg) {
                         const finalParams = this.renderer.getContainDrawParams(finalImg.width, finalImg.height, this.renderer.width, this.renderer.height);
+                        
+                        // 计算致谢图片的渐明渐暗
+                        const timeAfterBlack = fadeTime - this.config.ending.fadeToBlackDuration;
+                        let finalAlpha = 0;
+                        if (timeAfterBlack < 2000) {
+                            finalAlpha = timeAfterBlack / 2000; // 2秒渐明
+                        } else if (timeAfterBlack < 5000) {
+                            finalAlpha = 1; // 保持3秒
+                        } else {
+                            finalAlpha = 1 - (timeAfterBlack - 5000) / 2000; // 2秒渐暗
+                            if (finalAlpha < 0) finalAlpha = 0;
+                        }
+                        
+                        this.renderer.ctx.save();
+                        this.renderer.ctx.globalAlpha = finalAlpha;
                         this.renderer.ctx.drawImage(finalImg, finalParams.x, finalParams.y, finalParams.w, finalParams.h);
+                        this.renderer.ctx.restore();
                     }
                     
-                    this.renderer.drawText("点击任意处返回大厅重新游玩", this.renderer.width/2, this.renderer.height * 0.95, 16, 0.6);
+                    if (fadeTime > this.config.ending.fadeToBlackDuration + 7500) {
+                        this.switchState(this.STATES.LOBBY);
+                    }
+                    
+                    this.renderer.drawText("等待或点击返回大厅", this.renderer.width/2, this.renderer.height * 0.95, 16, 0.6);
                     this.renderer.applyCamera();
                 }
             }
@@ -921,7 +955,11 @@ class GameCore {
                     const targetW = wordImg.width * scale;
                     const targetH = wordImg.height * scale;
                     const targetX = boxX + (boxW - targetW) / 2;
-                    const targetY = boxY + (boxH - targetH) / 2;
+                    let targetY = boxY + (boxH - targetH) / 2;
+                    
+                    if (levelData.id === 4) {
+                        targetY -= boxH / 4;
+                    }
                     
                     this.renderer.ctx.drawImage(wordImg, targetX, targetY, targetW, targetH);
                     this.renderer.ctx.restore();
@@ -983,7 +1021,7 @@ class GameCore {
                     // 在 SETTLE 状态下，如果为 drag 模式，bgParams 对应的是带相框的桌布
                     // 需要计算真实的相框区域
                     if (levelData.playMode === 'drag') {
-                        const frameRect = this.config.core.dragMode.frameRect;
+                        const frameRect = this.config.pieces.dragMode.frameRect;
                         boxX += this.bgParams.w * frameRect.x;
                         boxY += this.bgParams.h * frameRect.y;
                         boxW = this.bgParams.w * frameRect.width;
@@ -998,7 +1036,11 @@ class GameCore {
                     const targetW = wordImg.width * scale;
                     const targetH = wordImg.height * scale;
                     const targetX = boxX + (boxW - targetW) / 2;
-                    const targetY = boxY + (boxH - targetH) / 2;
+                    let targetY = boxY + (boxH - targetH) / 2;
+                    
+                    if (levelData.id === 4) {
+                        targetY -= boxH / 4;
+                    }
                     
                     this.renderer.ctx.drawImage(wordImg, targetX, targetY, targetW, targetH);
                     this.renderer.ctx.restore();
