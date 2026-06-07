@@ -530,7 +530,13 @@ class GameCore {
             const scale = targetW / wordImg.width;
             const targetH = wordImg.height * scale;
             const targetX = (bgImg.width - targetW) / 2;
-            const targetY = (bgImg.height - targetH) / 2;
+            let targetY = (bgImg.height - targetH) / 2;
+            
+            if (levelData.id === 1) {
+                targetY = bgImg.height * 0.05;
+            } else if (levelData.id === 4) {
+                targetY -= bgImg.height / 4;
+            }
             
             ectx.drawImage(wordImg, targetX, targetY, targetW, targetH);
             ectx.restore();
@@ -870,7 +876,9 @@ class GameCore {
                         const targetX = boxX + (boxW - targetW) / 2;
                         let targetY = boxY + (boxH - targetH) / 2;
                         
-                        if (levelData.id === 4 || levelData.id === 1) {
+                        if (levelData.id === 1) {
+                            targetY -= boxH / 8;
+                        } else if (levelData.id === 4) {
                             targetY -= boxH / 4;
                         }
                         
@@ -1037,7 +1045,9 @@ class GameCore {
                     const targetX = boxX + (boxW - targetW) / 2;
                     let targetY = boxY + (boxH - targetH) / 2;
                     
-                    if (levelData.id === 4 || levelData.id === 1) {
+                    if (levelData.id === 1) {
+                        targetY = boxY + boxH * 0.08;
+                    } else if (levelData.id === 4) {
                         targetY -= boxH / 4;
                     }
                     

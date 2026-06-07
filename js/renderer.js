@@ -465,8 +465,8 @@ class Renderer {
     drawLobbySpotlight(mouseX, mouseY, levelsData, currentLevelIndex, params, radiusRatio = 0.3, globalAlpha = 1) {
         if (globalAlpha <= 0) return;
 
-        // 如果是手机端（未发生交互前坐标为初始值），直接照亮当前进度照片
-        if (mouseX <= -900 && mouseY <= -900) {
+        // 如果是手机端（未发生交互前坐标为初始值），或者是第一关（仅点亮第一幅图片），直接照亮当前进度照片
+        if (currentLevelIndex === 0 || (mouseX <= -900 && mouseY <= -900)) {
             const currentLevel = levelsData[currentLevelIndex];
             if (currentLevel) {
                 const rect = currentLevel.lobbyFrameRect;
@@ -563,19 +563,19 @@ class Renderer {
         
         // 游戏标题
         this.ctx.fillStyle = '#fff';
-        // 动态计算字体大小，防止在小屏幕上溢出
-        const titleFontSize = Math.min(56, this.width * 0.12);
+        // 动态计算字体大小，缩小一点并控制与屏幕边缘的距离
+        const titleFontSize = Math.min(46, this.width * 0.08);
         this.ctx.font = `bold ${titleFontSize}px sans-serif`;
         this.ctx.shadowColor = 'rgba(0,0,0,0.8)';
         this.ctx.shadowBlur = 10;
-        this.ctx.fillText("Piece Your Story", this.width / 2, this.height * 0.4);
+        this.ctx.fillText("Piece Your Story", this.width / 2, this.height * 0.4, this.width * 0.85);
         
         // 开始提示
         const alpha = (Math.sin(Date.now() / 300) + 1) / 2 * 0.5 + 0.3; // 呼吸闪烁
         this.ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-        const promptFontSize = Math.min(24, this.width * 0.06);
+        const promptFontSize = Math.min(22, this.width * 0.05);
         this.ctx.font = `${promptFontSize}px sans-serif`;
-        this.ctx.fillText("点击任意处开始游戏", this.width / 2, this.height * 0.7);
+        this.ctx.fillText("点击任意处开始游戏", this.width / 2, this.height * 0.7, this.width * 0.85);
         
         this.ctx.restore();
     }
