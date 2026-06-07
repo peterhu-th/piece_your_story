@@ -130,7 +130,7 @@ class Renderer {
      * 在大厅墙壁上绘制关卡画框和模糊预览图
      * 使用预合成 (Pre-composition) 策略保证对齐
      */
-    drawLobby(wallImgSrc, levelsData, blurImagesCache, globalAlpha = 1, currentLevelIndex = 0) {
+    drawLobby(wallImgSrc, levelsData, blurImagesCache, globalAlpha = 1, currentLevelIndex = 0, levelStars = []) {
         if (globalAlpha < 1) {
             this.ctx.globalAlpha = globalAlpha;
         }
@@ -188,26 +188,57 @@ class Renderer {
         const params = this.getContainDrawParams(this.lobbyCanvas.width, this.lobbyCanvas.height, this.width, this.height);
         this.ctx.drawImage(this.lobbyCanvas, params.x, params.y, params.w, params.h);
 
-        // 绘制当前可解锁关卡的呼吸发光边框
-        if (currentLevelIndex < levelsData.length) {
+        // 检查是否全部三星
+        const allThreeStars = levelsData.length > 0 && levelsData.every(l => {
+            const s = levelStars.find(record => record.id === l.id);
+            return s && s.stars === 3;
+        });
+
+        // 绘制当前可解锁关卡的呼吸发光边框，或者全三星的金色光芒
+        if (allThreeStars) {
+            levelsData.forEach(level => {
+                this._drawGlowFrame(level.lobbyFrameRect, params, 'gold');
+            });
+        } else if (currentLevelIndex < levelsData.length) {
             const currentLevel = levelsData[currentLevelIndex];
-            const rect = currentLevel.lobbyFrameRect;
-            const drawX = params.x + rect.x * params.w;
-            const drawY = params.y + rect.y * params.h;
-            const drawW = rect.width * params.w;
-            const drawH = rect.height * params.h;
+            this._drawGlowFrame(currentLevel.lobbyFrameRect, params, 'normal');
+        }
 
-            const cx = drawX + drawW / 2;
-            const cy = drawY + drawH / 2;
-            const maxR = Math.max(drawW, drawH) * 0.8;
+        this.ctx.globalAlpha = 1;
+    }
 
-            const glowAlpha = (Math.sin(Date.now() / 300) + 1) / 2 * 0.5 + 0.3; // 0.3 to 0.8
+    _drawGlowFrame(rect, params, type) {
+        const drawX = params.x + rect.x * params.w;
+        const drawY = params.y + rect.y * params.h;
+        const drawW = rect.width * params.w;
+        const drawH = rect.height * params.h;
+
+        const cx = drawX + drawW / 2;
+        const cy = drawY + drawH / 2;
+        const maxR = Math.max(drawW, drawH) * 0.8;
+
+        const glowAlpha = (Math.sin(Date.now() / 300) + 1) / 2 * 0.5 + 0.3; // 0.3 to 0.8
+        
+        const gradient = this.ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
+        if (type === 'gold') {
+            gradient.addColorStop(0, `rgba(255, 215, 0, ${glowAlpha})`);
+            gradient.addColorStop(0.5, `rgba(255, 165, 0, ${glowAlpha * 0.3})`);
+            gradient.addColorStop(1, `rgba(255, 140, 0, 0)`);
             
-            const gradient = this.ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
+            this.ctx.save();
+            this.ctx.globalCompositeOperation = 'screen';
+            this.ctx.fillStyle = gradient;
+            this.ctx.fillRect(drawX, drawY, drawW, drawH);
+            
+            this.ctx.strokeStyle = `rgba(255, 215, 0, ${glowAlpha * 0.8})`;
+            this.ctx.lineWidth = 5;
+            this.ctx.strokeRect(drawX, drawY, drawW, drawH);
+            this.ctx.restore();
+        } else {
             gradient.addColorStop(0, `rgba(255, 235, 180, ${glowAlpha})`);
             gradient.addColorStop(0.5, `rgba(255, 200, 100, ${glowAlpha * 0.3})`);
             gradient.addColorStop(1, `rgba(255, 180, 80, 0)`);
-
+            
             this.ctx.save();
             this.ctx.globalCompositeOperation = 'screen';
             this.ctx.fillStyle = gradient;
@@ -248,6 +279,25 @@ class Renderer {
             renderParams.bgY = params.y;
             renderParams.bgW = params.w;
             renderParams.bgH = params.h;
+        }
+    }
+
+    /**
+     * 在指定的矩形区域内绘制关卡原图（用于 drag 模式的相框）
+     */
+    drawLevelImageRect(clearImgSrc, blurImg, rect, blurAlpha = 1) {
+        const clearImg = this.getImage(clearImgSrc);
+        if (!clearImg) return;
+        
+        // 渲染清晰底图
+        this.ctx.drawImage(clearImg, rect.x, rect.y, rect.width, rect.height);
+        
+        // 叠加模糊层
+        if (blurAlpha > 0 && blurImg) {
+            this.ctx.save();
+            this.ctx.globalAlpha = blurAlpha;
+            this.ctx.drawImage(blurImg, rect.x, rect.y, rect.width, rect.height);
+            this.ctx.restore();
         }
     }
 
@@ -356,6 +406,179 @@ class Renderer {
      */
     drawLevelText({ text, x, y, alpha }) {
         this.drawText(text, x, y, 28, alpha);
+    }
+
+    /**
+     * 绘制雨滴粒子
+     */
+    drawRain(particles, levelsData, currentLevelIndex, params) {
+        this.ctx.save();
+        
+        // 如果传入了 params，则应用遮罩，将雨滴限制在背景图范围内
+        if (params) {
+            this.ctx.beginPath();
+            this.ctx.rect(params.x, params.y, params.w, params.h);
+            this.ctx.clip(); // 仅允许在背景图内部绘制
+        }
+
+        this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        this.ctx.lineWidth = 1.5;
+        this.ctx.beginPath();
+        for (let i = 0; i < particles.length; i++) {
+            const p = particles[i];
+            const len = p.length;
+            const speed = Math.hypot(p.vx, p.vy);
+            const dx = (p.vx / speed) * len;
+            const dy = (p.vy / speed) * len;
+            
+            this.ctx.moveTo(p.x, p.y);
+            this.ctx.lineTo(p.x + dx, p.y + dy);
+        }
+        this.ctx.stroke();
+        this.ctx.restore();
+    }
+
+    /**
+     * 绘制游戏UI进度条
+     */
+    drawProgressBar(placedPieces, totalPieces, currentMoves, maxMoves) {
+        this.ctx.save();
+        
+        // 进度条本身
+        const barWidth = this.width * 0.6;
+        const barHeight = 8;
+        const x = (this.width - barWidth) / 2;
+        const y = 20;
+
+        // 背景槽
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        this.ctx.beginPath();
+        this.ctx.roundRect(x, y, barWidth, barHeight, barHeight / 2);
+        this.ctx.fill();
+
+        // 进度
+        const progress = placedPieces / totalPieces;
+        if (progress > 0) {
+            this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            this.ctx.beginPath();
+            this.ctx.roundRect(x, y, barWidth * progress, barHeight, barHeight / 2);
+            this.ctx.fill();
+        }
+
+        // 文字信息
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        this.ctx.font = '14px sans-serif';
+        this.ctx.textAlign = 'right';
+        this.ctx.fillText(`步数: ${currentMoves}`, x + barWidth, y + 25);
+        this.ctx.textAlign = 'left';
+        this.ctx.fillText(`进度: ${placedPieces}/${totalPieces}`, x, y + 25);
+
+        this.ctx.restore();
+    }
+
+    /**
+     * 绘制主大厅的探照灯效果
+     */
+    drawLobbySpotlight(mouseX, mouseY, levelsData, currentLevelIndex, params, radiusRatio = 0.3, globalAlpha = 1) {
+        if (globalAlpha <= 0) return;
+
+        // 初始化或调整离屏黑幕画布的大小
+        if (!this.darkCanvas || this.darkCanvas.width !== this.width || this.darkCanvas.height !== this.height) {
+            if (!this.darkCanvas) this.darkCanvas = document.createElement('canvas');
+            this.darkCanvas.width = this.width;
+            this.darkCanvas.height = this.height;
+            this.darkCtx = this.darkCanvas.getContext('2d');
+        }
+
+        const dctx = this.darkCtx;
+        
+        // 1. 先铺满黑底
+        dctx.globalCompositeOperation = 'source-over';
+        dctx.clearRect(0, 0, this.width, this.height);
+        dctx.fillStyle = 'rgba(0,0,0,0.95)';
+        dctx.fillRect(0, 0, this.width, this.height);
+
+        // 2. 使用 destination-out 将光照区域的黑色挖空
+        dctx.globalCompositeOperation = 'destination-out';
+        
+        const radius = Math.max(this.width, this.height) * radiusRatio; // 灯光范围
+        
+        // 挖除鼠标探照灯
+        const mouseGradient = dctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, radius);
+        mouseGradient.addColorStop(0, 'rgba(0,0,0,1)');
+        mouseGradient.addColorStop(0.3, 'rgba(0,0,0,0.8)');
+        mouseGradient.addColorStop(0.8, 'rgba(0,0,0,0.1)');
+        mouseGradient.addColorStop(1, 'rgba(0,0,0,0)');
+        dctx.fillStyle = mouseGradient;
+        dctx.fillRect(0, 0, this.width, this.height);
+
+        // 挖除已通关的画作（作为额外发光源）
+        if (levelsData && params) {
+            for (let i = 0; i < currentLevelIndex && i < levelsData.length; i++) {
+                const rect = levelsData[i].lobbyFrameRect;
+                const cx = params.x + (rect.x + rect.width / 2) * params.w;
+                const cy = params.y + (rect.y + rect.height / 2) * params.h;
+                
+                const frameGradient = dctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+                frameGradient.addColorStop(0, 'rgba(0,0,0,1)');
+                frameGradient.addColorStop(0.3, 'rgba(0,0,0,0.8)');
+                frameGradient.addColorStop(0.8, 'rgba(0,0,0,0.1)');
+                frameGradient.addColorStop(1, 'rgba(0,0,0,0)');
+                
+                dctx.fillStyle = frameGradient;
+                dctx.fillRect(0, 0, this.width, this.height);
+            }
+        }
+
+        // 3. 恢复源覆盖模式，覆盖未解锁的画作使之保持漆黑
+        dctx.globalCompositeOperation = 'source-over';
+        dctx.fillStyle = 'rgba(0,0,0,0.95)';
+        if (levelsData && params) {
+            for (let i = currentLevelIndex + 1; i < levelsData.length; i++) {
+                const rect = levelsData[i].lobbyFrameRect;
+                const drawX = params.x + rect.x * params.w;
+                const drawY = params.y + rect.y * params.h;
+                const drawW = rect.width * params.w;
+                const drawH = rect.height * params.h;
+                dctx.fillRect(drawX, drawY, drawW, drawH);
+            }
+        }
+        
+        // 4. 将离屏画布混合到主画布上
+        this.ctx.save();
+        this.ctx.globalAlpha = globalAlpha;
+        this.ctx.drawImage(this.darkCanvas, 0, 0);
+        this.ctx.restore();
+    }
+
+    /**
+     * 绘制游戏开始界面
+     */
+    drawStartScreen(wallImgSrc, params) {
+        // 画变暗的背景
+        this.drawGameBackground(wallImgSrc, null, params, 0);
+        
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        this.ctx.fillRect(0, 0, this.width, this.height);
+        
+        this.ctx.save();
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        
+        // 游戏标题
+        this.ctx.fillStyle = '#fff';
+        this.ctx.font = 'bold 56px sans-serif';
+        this.ctx.shadowColor = 'rgba(0,0,0,0.8)';
+        this.ctx.shadowBlur = 10;
+        this.ctx.fillText("Piece Your Story", this.width / 2, this.height * 0.4);
+        
+        // 开始提示
+        const alpha = (Math.sin(Date.now() / 300) + 1) / 2 * 0.5 + 0.3; // 呼吸闪烁
+        this.ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+        this.ctx.font = '24px sans-serif';
+        this.ctx.fillText("点击任意处开始游戏", this.width / 2, this.height * 0.7);
+        
+        this.ctx.restore();
     }
 }
 

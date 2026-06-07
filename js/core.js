@@ -14,6 +14,7 @@ class GameCore {
 
         this.STATES = {
             LOADING: 0,
+            START: 7,   // 开始界面
             LOBBY: 1,
             INTRO: 2,   // 放大镜头
             PLAY: 3,    // 游玩
@@ -42,6 +43,15 @@ class GameCore {
         this.endingSlideIndex = 0;
         this.endingLastSlideTime = 0;
 
+        // 星级与游玩数据记录
+        this.levelPlayTime = 0;
+        this.currentMoves = 0;
+        this.levelStars = JSON.parse(localStorage.getItem('piece_levelStars')) || []; // {id: 1, stars: 3}
+        
+        // 雨滴粒子系统
+        this.rainParticles = [];
+        this.initRain();
+
         // 音频系统
         this.bgmAudio = new Audio(this.config.audio.bgm);
         this.bgmAudio.loop = true;
@@ -52,10 +62,27 @@ class GameCore {
         this.setupPointerEvents();
     }
 
+    initRain() {
+        const count = 100;
+        this.rainParticles = [];
+        const cw = window.innerWidth * (window.devicePixelRatio || 1);
+        const ch = window.innerHeight * (window.devicePixelRatio || 1);
+        
+        for(let i = 0; i < count; i++) {
+            this.rainParticles.push({
+                x: Math.random() * cw,
+                y: Math.random() * ch,
+                vx: -8 - Math.random() * 4, // 强风斜向吹
+                vy: 20 + Math.random() * 10, // 较快的下落速度
+                length: 25 + Math.random() * 15
+            });
+        }
+    }
+
     async init() {
         try {
             // 收集所有需要预加载的图片
-            const imagePaths = [this.config.lobby.wallImage];
+            const imagePaths = [this.config.lobby.wallImage, this.config.pieces.dragMode.backgroundImage];
             this.config.levels.forEach(l => {
                 imagePaths.push(l.image);
             });
@@ -69,8 +96,8 @@ class GameCore {
                 this.blurCache[l.image] = this.renderer.generateBlurredImage(img, blurRadius);
             });
 
-            // 进入大厅
-            this.switchState(this.STATES.LOBBY);
+            // 进入开始界面
+            this.switchState(this.STATES.START);
             
             // 开始循环
             requestAnimationFrame((time) => this.loop(time));
@@ -101,17 +128,44 @@ class GameCore {
             }
         }
         else if (newState === this.STATES.PLAY) {
-            // 初次随机挑选几个直接 spawn
+            this.levelPlayTime = 0;
+            this.currentMoves = 0;
+
             const waitingPieces = this.pieces.filter(p => p.state === 'WAITING');
             waitingPieces.sort(() => Math.random() - 0.5);
-            const initialCount = Math.min(waitingPieces.length, this.config.pieces.maxConcurrentPieces);
+
+            const mode = this.config.levels[this.currentLevelIndex].playMode || "timing";
+            
+            const initialCount = mode === "drag"
+                ? waitingPieces.length
+                : Math.min(waitingPieces.length, this.config.pieces.maxConcurrentPieces);
+
             for(let i=0; i<initialCount; i++) {
                 waitingPieces[i].spawn();
             }
             this.isSpawning = false;
         }
         else if (newState === this.STATES.SETTLE) {
-            // 结算阶段（不再存储到 localStorage）
+            // 结算阶段（计算并存储星级）
+            const levelData = this.config.levels[this.currentLevelIndex];
+            const targetTime = levelData.targetTime || 30;
+            const targetMoves = levelData.targetMoves || 10;
+            
+            let stars = 1; // 基础1星
+            const actualTime = this.levelPlayTime / 1000;
+            if (actualTime <= targetTime) stars++; // 达标时间+1星
+            if (this.currentMoves <= targetMoves) stars++; // 达标步数+1星
+
+            // 保存或更新记录
+            const existingRecord = this.levelStars.find(s => s.id === levelData.id);
+            if (existingRecord) {
+                if (stars > existingRecord.stars) {
+                    existingRecord.stars = stars;
+                }
+            } else {
+                this.levelStars.push({ id: levelData.id, stars: stars });
+            }
+            localStorage.setItem('piece_levelStars', JSON.stringify(this.levelStars));
         }
         else if (newState === this.STATES.END) {
             this.endingSlideIndex = 0;
@@ -123,17 +177,39 @@ class GameCore {
      * 准备关卡：计算裁剪区域、生成拼图碎片网格
      */
     prepareLevel(levelData) {
-        const img = this.renderer.getImage(levelData.image);
-        // 先计算一次全图显示的参数，以便获得 bgW, bgH, bgX, bgY (现在统一使用 Contain)
-        this.bgParams = this.renderer.getContainDrawParams(img.width, img.height, this.renderer.width, this.renderer.height);
+        const mode = levelData.playMode || "timing";
         
-        // 计算挖空区域 (Cutout) 在屏幕上的真实包围盒
-        this.cutoutBox = {
-            x: this.bgParams.x + levelData.cutoutBoundary.x * this.bgParams.w,
-            y: this.bgParams.y + levelData.cutoutBoundary.y * this.bgParams.h,
-            width: levelData.cutoutBoundary.width * this.bgParams.w,
-            height: levelData.cutoutBoundary.height * this.bgParams.h
-        };
+        if (mode === "drag") {
+            const dragConf = this.config.pieces.dragMode;
+            const bgImg = this.renderer.getImage(dragConf.backgroundImage);
+            this.bgParams = this.renderer.getContainDrawParams(bgImg.width, bgImg.height, this.renderer.width, this.renderer.height);
+            
+            // 拼图相框区域
+            this.puzzleRect = {
+                x: this.bgParams.x + dragConf.frameRect.x * this.bgParams.w,
+                y: this.bgParams.y + dragConf.frameRect.y * this.bgParams.h,
+                width: dragConf.frameRect.width * this.bgParams.w,
+                height: dragConf.frameRect.height * this.bgParams.h
+            };
+            
+            // 拼图切块区域（相当于把原图缩放并放在 puzzleRect 中，然后再依据 cutoutBoundary 切割）
+            this.cutoutBox = {
+                x: this.puzzleRect.x + levelData.cutoutBoundary.x * this.puzzleRect.width,
+                y: this.puzzleRect.y + levelData.cutoutBoundary.y * this.puzzleRect.height,
+                width: levelData.cutoutBoundary.width * this.puzzleRect.width,
+                height: levelData.cutoutBoundary.height * this.puzzleRect.height
+            };
+        } else {
+            const img = this.renderer.getImage(levelData.image);
+            this.bgParams = this.renderer.getContainDrawParams(img.width, img.height, this.renderer.width, this.renderer.height);
+            
+            this.cutoutBox = {
+                x: this.bgParams.x + levelData.cutoutBoundary.x * this.bgParams.w,
+                y: this.bgParams.y + levelData.cutoutBoundary.y * this.bgParams.h,
+                width: levelData.cutoutBoundary.width * this.bgParams.w,
+                height: levelData.cutoutBoundary.height * this.bgParams.h
+            };
+        }
 
         // 按网格拆分碎片
         this.pieces = [];
@@ -208,43 +284,27 @@ class GameCore {
         }
         }
         
-        // 修正 piece 内的方法作用域
-        const mode = levelData.playMode || "timing";
-        
         this.pieces.forEach(p => {
             p.spawn = () => {
                 if (mode === "drag") {
                     const dragConf = this.config.pieces.dragMode;
-                    const scatterMinY = this.renderer.height * dragConf.scatterAreaY.min;
-                    const scatterMaxY = this.renderer.height * dragConf.scatterAreaY.max;
-                    
+                    const scatterMinY = this.bgParams.y + this.bgParams.h * dragConf.scatterAreaY.min;
+                    const scatterMaxY = this.bgParams.y + this.bgParams.h * dragConf.scatterAreaY.max - p.height;
                     const spawnY = scatterMinY + Math.random() * (scatterMaxY - scatterMinY);
                     
-                    // 计算最终放大后的相机参数
-                    const targetCenterX = this.cutoutBox.x + this.cutoutBox.width / 2 - this.renderer.width / 2;
-                    const targetCenterY = this.cutoutBox.y + this.cutoutBox.height / 2 - this.renderer.height / 2;
-                    const scaleW = this.renderer.width / this.cutoutBox.width;
-                    const scaleH = this.renderer.height / this.cutoutBox.height;
-                    const targetScale = Math.min(Math.min(scaleW, scaleH) * 0.45, 1.8);
-
-                    const spawnX = Math.random() * (this.renderer.width - p.width * targetScale);
+                    const scatterMinX = this.bgParams.x;
+                    const scatterMaxX = this.bgParams.x + this.bgParams.w - p.width;
+                    const spawnX = scatterMinX + Math.random() * (scatterMaxX - scatterMinX);
                     
-                    const cw = this.renderer.canvas.clientWidth;
-                    const ch = this.renderer.canvas.clientHeight;
-                    
-                    let wx = spawnX - cw / 2;
-                    let wy = spawnY - ch / 2;
-                    wx = wx / targetScale;
-                    wy = wy / targetScale;
-                    wx = wx + cw / 2 + targetCenterX;
-                    wy = wy + ch / 2 + targetCenterY;
-
                     p.state = 'MOVING'; // 在拖拽模式下，MOVING表示自由散落状态
-                    p.currentX = wx;
-                    p.currentY = wy;
-                    p.spawnX = wx;
-                    p.spawnY = wy;
+                    p.currentX = spawnX;
+                    p.currentY = spawnY;
+                    p.spawnX = spawnX;
+                    p.spawnY = spawnY;
                     p.rotation = (dragConf.scatterRotation.min + Math.random() * (dragConf.scatterRotation.max - dragConf.scatterRotation.min)) * Math.PI / 180;
+                    if (levelData.noRotation) {
+                        p.rotation = 0;
+                    }
                 } else {
                     const conf = this.config.pieces;
                     const trackY = this.renderer.height * conf.yPositionTracks[Math.floor(Math.random() * conf.yPositionTracks.length)];
@@ -294,15 +354,7 @@ class GameCore {
                         this.dragOffsetY = this.draggedPiece.currentY - wy;
                     }
                 } else {
-                    // Timing 模式：点击下落
-                    let hitPieces = this.pieces.filter(p => p.state === 'MOVING' && this.input.isPointInPiece(wx, wy, p));
-                    if (hitPieces.length > 0) {
-                        hitPieces.forEach(p => {
-                            p.state = 'FALLING';
-                            p.speedX = 0;
-                            p.speedY = 0;
-                        });
-                    }
+                    // Timing 模式：交由 handleTap 处理
                 }
             } else {
                 // 非 PLAY 状态交给 handleTap
@@ -321,6 +373,7 @@ class GameCore {
             if (this.draggedPiece) {
                 const p = this.draggedPiece;
                 this.draggedPiece = null;
+                this.currentMoves++; // 记录一次拖放步数
                 
                 const dist = Math.hypot(p.currentX - p.targetX, p.currentY - p.targetY);
                 if (dist <= this.config.core.snapTolerance * 2) {
@@ -342,7 +395,31 @@ class GameCore {
      * 处理点击事件（大厅与状态切换）
      */
     handleTap(worldX, worldY) {
-        if (this.currentState === this.STATES.LOBBY) {
+        if (this.currentState === this.STATES.START) {
+            this.switchState(this.STATES.LOBBY);
+            if (this.bgmAudio.paused) {
+                this.bgmAudio.play().catch(e => console.log('BGM wait interaction'));
+            }
+            return;
+        }
+        else if (this.currentState === this.STATES.PLAY) {
+            const mode = this.config.levels[this.currentLevelIndex].playMode || "timing";
+
+            if (mode === "timing") {
+                const hitPieces = this.pieces.filter(p => p.state === 'MOVING' && this.input.isPointInPiece(worldX, worldY, p));
+                if (hitPieces.length > 0) {
+                    if (this.config.core.overlapZIndexStrategy === 'highest') {
+                        hitPieces.sort((a, b) => b.zIndex - a.zIndex);
+                    }
+                    const target = hitPieces[0];
+                    target.state = 'FALLING';
+                    target.speedX = 0;
+                    target.speedY = 0;
+                    this.currentMoves++; // 记录一次点击步数
+                }
+            }
+        }
+        else if (this.currentState === this.STATES.LOBBY) {
             const params = this.renderer.getContainDrawParams(this.renderer.lobbyCanvas.width, this.renderer.lobbyCanvas.height, this.renderer.width, this.renderer.height);
             // 这里 worldX 和 worldY 在 LOBBY 里就是屏幕坐标，因为 camera 未缩放平移
             const canvasX = (worldX - params.x) / params.w;
@@ -363,7 +440,12 @@ class GameCore {
             if (clickedIndex === this.currentLevelIndex) {
                 this.switchState(this.STATES.INTRO);
             } else if (clickedIndex > this.currentLevelIndex) {
-                this.showToast("按顺序来吧");
+                if (this.config.lobby.allowFreeSelection) {
+                    this.currentLevelIndex = clickedIndex;
+                    this.switchState(this.STATES.INTRO);
+                } else {
+                    this.showToast("按顺序来吧");
+                }
             } else if (clickedIndex < this.currentLevelIndex) {
                 this.viewingLevelIndex = clickedIndex;
                 this.switchState(this.STATES.VIEW_COMPLETED);
@@ -374,30 +456,29 @@ class GameCore {
             this.switchState(this.STATES.LOBBY);
             return;
         }
-        else if (this.currentState === this.STATES.PLAY) {
-            // 检测点击到的 moving 状态的碎片
-            const hitPieces = this.pieces.filter(p => p.state === 'MOVING' && this.input.isPointInPiece(worldX, worldY, p));
-            if (hitPieces.length > 0) {
-                // 根据 zIndex 策略选取
-                if (this.config.core.overlapZIndexStrategy === 'highest') {
-                    hitPieces.sort((a, b) => b.zIndex - a.zIndex);
-                }
-                const target = hitPieces[0];
-                target.state = 'FALLING';
-                target.speedX = 0;
-                target.speedY = 0; // 初始下落速度
-            }
-        }
         else if (this.currentState === this.STATES.SETTLE) {
             // Settle 结束且提示文字展示完毕后，点击进入下一关或结局
             const timeSince = performance.now() - this.stateStartTime;
-            if (timeSince > this.config.animation.zoomOut) {
+            if (timeSince > this.config.animation.zoomOut + this.config.animation.blurTransition + this.config.animation.textFadeIn + 1000) {
                 this.currentLevelIndex++;
                 if (this.currentLevelIndex < this.config.levels.length) {
-                    this.switchState(this.STATES.INTRO);
+                    this.switchState(this.STATES.LOBBY); // 回退到大厅
                 } else {
                     this.switchState(this.STATES.END);
                 }
+            }
+        }
+        else if (this.currentState === this.STATES.END) {
+            const timeSince = performance.now() - this.stateStartTime;
+            const lobbyDuration = 3000;
+            const singleImageDuration = 4000;
+            const startFadeToBlackTime = lobbyDuration + this.config.levels.length * singleImageDuration;
+            
+            if (timeSince > startFadeToBlackTime + this.config.ending.fadeToBlackDuration) {
+                // 回到大厅重新游玩，不清除星级记录
+                this.currentLevelIndex = 0;
+                this.totalPlayTime = 0;
+                this.switchState(this.STATES.LOBBY);
             }
         }
     }
@@ -406,8 +487,29 @@ class GameCore {
      * 主循环更新
      */
     update(dt) {
+        // 更新光标样式
+        if (this.currentState === this.STATES.LOBBY) {
+            this.renderer.canvas.style.cursor = 'none';
+        } else {
+            this.renderer.canvas.style.cursor = 'default';
+        }
+
+        if (this.currentLevelIndex < this.config.levels.length && this.currentState !== this.STATES.VIEW_COMPLETED) {
+            const cw = window.innerWidth * (window.devicePixelRatio || 1);
+            const ch = window.innerHeight * (window.devicePixelRatio || 1);
+            this.rainParticles.forEach(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                if (p.y > ch + p.length) {
+                    p.y = -p.length;
+                    p.x = Math.random() * cw;
+                }
+            });
+        }
+
         if (this.currentState === this.STATES.PLAY) {
-            this.totalPlayTime += dt / 1000;
+            this.totalPlayTime += dt;
+            this.levelPlayTime += dt;
             let allPlaced = true;
             const conf = this.config.pieces;
             const mode = this.config.levels[this.currentLevelIndex].playMode || "timing";
@@ -544,8 +646,17 @@ class GameCore {
         this.renderer.clear();
         this.renderer.applyCamera();
 
-        if (this.currentState === this.STATES.LOBBY) {
-            this.renderer.drawLobby(this.config.lobby.wallImage, this.config.levels, this.blurCache, 1, this.currentLevelIndex);
+        if (this.currentState === this.STATES.START) {
+            this.renderer.restoreCamera();
+            const wallImg = this.renderer.getImage(this.config.lobby.wallImage);
+            if (wallImg) {
+                const params = this.renderer.getContainDrawParams(wallImg.width, wallImg.height, this.renderer.width, this.renderer.height);
+                this.renderer.drawStartScreen(this.config.lobby.wallImage, params);
+            }
+            return;
+        }
+        else if (this.currentState === this.STATES.LOBBY) {
+            this.renderer.drawLobby(this.config.lobby.wallImage, this.config.levels, this.blurCache, 1, this.currentLevelIndex, this.levelStars);
         }
         else if (this.currentState >= this.STATES.INTRO && this.currentState <= this.STATES.SETTLE) {
             const levelData = this.config.levels[this.currentLevelIndex];
@@ -559,57 +670,119 @@ class GameCore {
                 }
             }
 
-            this.renderer.drawGameBackground(levelData.image, this.blurCache[levelData.image], this.bgParams, blurAlpha);
-
-            // 如果不是结算完成状态，画边框
-            if (this.currentState !== this.STATES.SETTLE || blurAlpha > 0) {
-                this.renderer.drawCutoutBorder(this.cutoutBox);
+            if (mode === "drag") {
+                // 拖拽模式使用专属桌面底图
+                this.renderer.drawGameBackground(this.config.pieces.dragMode.backgroundImage, null, this.bgParams, 0);
+                // 绘制相框内的底图 (半透明或者变清晰的图)
+                this.renderer.drawLevelImageRect(levelData.image, this.blurCache[levelData.image], this.puzzleRect, blurAlpha);
+                
+                // 画提示边框 (针对 cutoutBox)
+                if (this.currentState !== this.STATES.SETTLE || blurAlpha > 0) {
+                    this.renderer.drawCutoutBorder(this.cutoutBox);
+                }
+            } else {
+                this.renderer.drawGameBackground(levelData.image, this.blurCache[levelData.image], this.bgParams, blurAlpha);
+                if (this.currentState !== this.STATES.SETTLE || blurAlpha > 0) {
+                    this.renderer.drawCutoutHole(this.cutoutBox);
+                    this.renderer.drawCutoutBorder(this.cutoutBox);
+                }
             }
+
+            // 准备给碎片的渲染参数，由于 drag 模式底图缩小到了 puzzleRect，碎片贴图需要对齐 puzzleRect
+            const pieceRenderParams = mode === "drag" ? {
+                bgX: this.puzzleRect.x,
+                bgY: this.puzzleRect.y,
+                bgW: this.puzzleRect.width,
+                bgH: this.puzzleRect.height
+            } : this.bgParams;
 
             // 画放置好的碎片 (它们带有自己的遮罩，所以实际上它们是清晰的)
             const srcImg = this.renderer.getImage(levelData.image);
             this.pieces.filter(p => p.state === 'PLACED').forEach(p => {
-                // 如果已经完全拼好且变清晰，可以不再单独渲染边框
                 const showEdge = blurAlpha > 0;
-                this.renderer.drawPiece(p, srcImg, this.bgParams, showEdge ? this.config.pieces : null);
+                this.renderer.drawPiece(p, srcImg, pieceRenderParams, showEdge ? this.config.pieces : null);
             });
 
             // 绘制非放置状态的所有图块 (包括 MOVING、DRAGGING、RETURNING、FALLING)
-            // 根据 zIndex 排序，让被拖拽或在上方的图块覆盖其他图块
             this.pieces.filter(p => p.state !== 'PLACED' && p.state !== 'WAITING')
                 .sort((a,b) => a.zIndex - b.zIndex)
                 .forEach(p => {
-                    this.renderer.drawPiece(p, srcImg, this.bgParams, this.config.pieces);
+                    this.renderer.drawPiece(p, srcImg, pieceRenderParams, this.config.pieces);
                 });
+
+            // 如果处于游玩状态，绘制 UI 进度条
+            if (this.currentState === this.STATES.PLAY) {
+                const totalPieces = this.pieces.length;
+                const placedPieces = this.pieces.filter(p => p.state === 'PLACED').length;
+                const maxMoves = this.config.levels[this.currentLevelIndex].targetMoves || 10;
+                this.renderer.drawProgressBar(placedPieces, totalPieces, this.currentMoves, maxMoves);
+            }
         }
         else if (this.currentState === this.STATES.END) {
-            // 结局幻灯片
             const now = performance.now();
-            const elapsed = now - this.endingLastSlideTime;
+            const elapsed = now - this.stateStartTime;
             
-            if (elapsed > this.config.ending.slideshowInterval && this.endingSlideIndex < this.config.levels.length) {
-                this.endingSlideIndex++;
-                this.endingLastSlideTime = now;
-            }
+            const lobbyDuration = 3000;
+            const singleImageDuration = 4000; // 1000ms fade in, 2000ms hold, 1000ms fade out
+            const allImagesDuration = this.config.levels.length * singleImageDuration;
+            const startFadeToBlackTime = lobbyDuration + allImagesDuration;
+            
+            // 默认画个纯黑底，防止图片切换时闪烁
+            this.renderer.ctx.fillStyle = '#000';
+            this.renderer.ctx.fillRect(-this.renderer.camera.x, -this.renderer.camera.y, this.renderer.width * 2, this.renderer.height * 2);
 
-            if (this.endingSlideIndex < this.config.levels.length) {
-                const levelData = this.config.levels[this.endingSlideIndex];
-                this.renderer.drawGameBackground(levelData.image, null, this.bgParams, 0); // 纯清晰
-                this.renderer.drawText(levelData.successText, this.renderer.width/2, this.renderer.height * 0.8, 24);
-            } else {
-                // 黑屏致谢
-                const fadeProgress = Math.min(1, (now - this.endingLastSlideTime) / this.config.ending.fadeToBlackDuration);
+            if (elapsed < lobbyDuration) {
+                // 1. 回到大厅，全清晰，展示金色边框
+                this.renderer.drawLobby(this.config.lobby.wallImage, this.config.levels, this.blurCache, 1, this.config.levels.length, this.levelStars);
+            } 
+            else if (elapsed < startFadeToBlackTime) {
+                // 2. 依次展示每张图
+                const imageIndex = Math.floor((elapsed - lobbyDuration) / singleImageDuration);
+                const timeInImage = (elapsed - lobbyDuration) % singleImageDuration;
+                
+                let alpha = 1;
+                if (timeInImage < 1000) {
+                    alpha = timeInImage / 1000;
+                } else if (timeInImage > 3000) {
+                    alpha = 1 - (timeInImage - 3000) / 1000;
+                }
+                
+                if (imageIndex < this.config.levels.length) {
+                    const levelData = this.config.levels[imageIndex];
+                    this.renderer.drawGameBackground(levelData.image, null, this.bgParams, 0); // 只画清晰
+                    
+                    // 叠加半透明黑底凸显文字
+                    this.renderer.ctx.save();
+                    this.renderer.ctx.fillStyle = `rgba(0, 0, 0, ${0.4 * alpha})`;
+                    this.renderer.ctx.fillRect(-this.renderer.camera.x, -this.renderer.camera.y, this.renderer.width * 2, this.renderer.height * 2);
+                    this.renderer.restoreCamera(); // 文字用屏幕坐标
+                    
+                    this.renderer.drawText(levelData.successText, this.renderer.width/2, this.renderer.height * 0.8, 24, alpha);
+                    this.renderer.applyCamera();
+                }
+            }
+            else {
+                // 3. 黑屏与致谢
+                const fadeTime = elapsed - startFadeToBlackTime;
+                const fadeProgress = Math.min(1, fadeTime / this.config.ending.fadeToBlackDuration);
+                
                 this.renderer.ctx.fillStyle = `rgba(0,0,0,${fadeProgress})`;
                 this.renderer.ctx.fillRect(-this.renderer.camera.x, -this.renderer.camera.y, this.renderer.width * 2, this.renderer.height * 2);
                 
                 if (fadeProgress >= 1) {
+                    this.renderer.restoreCamera();
                     this.config.ending.finalTexts.forEach((txt, i) => {
-                        this.renderer.drawText(txt, this.renderer.width/2, this.renderer.height/2 + i * 40 - 40, 24, 1);
+                        this.renderer.drawText(txt, this.renderer.width/2, this.renderer.height/2 + i * 40 - 80, 24, 1);
                     });
                     
-                    // 显示总耗时
                     const timeStr = `累计用时：${Math.ceil(this.totalPlayTime / 1000)} 秒`;
+                    const totalStars = this.levelStars.reduce((sum, r) => sum + r.stars, 0);
+                    const starStr = `共获得：${totalStars} 颗星`;
+                    
                     this.renderer.drawText(timeStr, this.renderer.width/2, this.renderer.height/2 + this.config.ending.finalTexts.length * 40, 18, 1);
+                    this.renderer.drawText(starStr, this.renderer.width/2, this.renderer.height/2 + this.config.ending.finalTexts.length * 40 + 30, 20, 1);
+                    this.renderer.drawText("点击任意处返回大厅重新游玩", this.renderer.width/2, this.renderer.height * 0.9, 16, 0.6);
+                    this.renderer.applyCamera();
                 }
             }
         }
@@ -637,24 +810,55 @@ class GameCore {
             const timeSince = performance.now() - this.stateStartTime;
             if (timeSince > this.config.animation.zoomOut + this.config.animation.blurTransition) {
                 // 开始显示文案
-                const textTime = timeSince - (this.config.animation.zoomOut + this.config.animation.blurTransition);
-                let alpha = 0;
-                if (textTime < this.config.animation.textFadeIn) {
-                    alpha = textTime / this.config.animation.textFadeIn;
-                } else if (textTime < this.config.animation.textFadeIn + this.config.animation.textDuration) {
-                    alpha = 1;
-                } else {
-                    const fadeOutTime = textTime - (this.config.animation.textFadeIn + this.config.animation.textDuration);
-                    alpha = Math.max(0, 1 - fadeOutTime / this.config.animation.textFadeOut);
+                const txtTime = timeSince - (this.config.animation.zoomOut + this.config.animation.blurTransition);
+                const txtAlpha = txtTime < this.config.animation.textFadeIn 
+                    ? txtTime / this.config.animation.textFadeIn 
+                    : 1;
+
+                this.renderer.drawLevelText({
+                    text: this.config.levels[this.currentLevelIndex].successText,
+                    x: this.renderer.width / 2,
+                    y: this.renderer.height * 0.2,
+                    alpha: txtAlpha
+                });
+
+                // 显示星星
+                const record = this.levelStars.find(s => s.id === this.config.levels[this.currentLevelIndex].id);
+                if (record) {
+                    let starText = "评价：";
+                    for(let i=0; i<3; i++) {
+                        starText += (i < record.stars) ? "★" : "☆";
+                    }
+                    this.renderer.drawText(starText, this.renderer.width/2, this.renderer.height * 0.8, 24, txtAlpha);
                 }
-                
-                const levelData = this.config.levels[this.currentLevelIndex];
-                this.renderer.drawText(levelData.successText, this.renderer.width/2, this.renderer.height * 0.2, 28, alpha);
-                
+
                 // 提示下一关
-                if (alpha > 0.5 && textTime > this.config.animation.textFadeIn) {
-                    this.renderer.drawText(this.config.ui.nextLevelPrompt, this.renderer.width/2, this.renderer.height * 0.9, 18, alpha);
+                if (txtAlpha > 0.5 && txtTime > this.config.animation.textFadeIn) {
+                    this.renderer.drawText(this.config.ui.nextLevelPrompt, this.renderer.width/2, this.renderer.height * 0.9, 18, txtAlpha);
                 }
+            }
+        }
+
+        // 最后覆盖一层动态雨水效果
+        if (this.currentState === this.STATES.LOBBY && this.currentLevelIndex < this.config.levels.length) {
+            const params = this.renderer.getContainDrawParams(this.renderer.lobbyCanvas.width, this.renderer.lobbyCanvas.height, this.renderer.width, this.renderer.height);
+            this.renderer.drawRain(this.rainParticles, this.config.levels, this.currentLevelIndex, params);
+            
+            // 绘制探照灯效果
+            this.renderer.drawLobbySpotlight(this.input.currentScreenX, this.input.currentScreenY, this.config.levels, this.currentLevelIndex, params, this.config.lobby.spotlightRadiusRatio);
+        }
+        
+        // 当从大厅进入照片时，屏幕从黑渐变亮（温和过渡）
+        if (this.currentState === this.STATES.INTRO) {
+            const timeSince = performance.now() - this.stateStartTime;
+            let introEase = timeSince / this.config.animation.zoomIn;
+            if (introEase > 1) introEase = 1;
+            
+            if (introEase < 1) {
+                this.renderer.ctx.save();
+                this.renderer.ctx.fillStyle = `rgba(0, 0, 0, ${0.95 * (1 - introEase)})`;
+                this.renderer.ctx.fillRect(0, 0, this.renderer.width, this.renderer.height);
+                this.renderer.ctx.restore();
             }
         }
     }

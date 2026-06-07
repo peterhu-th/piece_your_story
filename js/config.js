@@ -38,7 +38,9 @@ const GameConfig = {
 
         // 拖拽模式专属配置
         dragMode: {
-            scatterAreaY: { min: 0.70, max: 0.90 }, // 散落区域占屏幕高度的比例（下方）
+            backgroundImage: "./resources/images/piece.png",
+            frameRect: { x: 0.1, y: 0.05, width: 0.8, height: 0.55 }, // 相框在 piece.png 上的相对坐标，可根据实际底图调整
+            scatterAreaY: { min: 0.65, max: 0.95 }, // 碎片在 piece.png 上的散落区域 Y 比例（相框下方）
             scatterRotation: { min: -15, max: 15 }, // 散落时的随机旋转角度
             returnSpeed: 0.15                       // 松手后飞回原位的插值系数
         }
@@ -76,7 +78,9 @@ const GameConfig = {
     // 5. 大厅与关卡剧本数据 (核心裁剪与文案配置)
     // ==========================================
     lobby: {
-        wallImage: "./resources/images/wall.png", // 引导大厅的背景墙图片
+        wallImage: "./resources/images/wall.png",
+        allowFreeSelection: true, // 设置为 true 允许玩家点击任意未解锁画作
+        spotlightRadiusRatio: 0.25 // 鼠标探照灯及发光画作的光照半径系数（基于屏幕最大边）
     },
 
     levels: [
@@ -86,10 +90,12 @@ const GameConfig = {
             // 在大厅 wall.png 上的画框坐标百分比和宽高比例（基于 wall 图片自身的宽高）
             lobbyFrameRect: { x: 0.12, y: 0.155, width: 0.35, height: 0.28 },
             // 目标区域：海边小屋（避开左下角小孩）
-            cutoutBoundary: { x: 0.45, y: 0.50, width: 0.40, height: 0.224 },
+            cutoutBoundary: { x: 0.3, y: 0.50, width: 0.60, height: 0.336 },
             grid: { cols: 2, rows: 2 }, // 七巧板其实不需要grid，但这保留备用
             shapeTemplate: "tangram", // 第一张使用七巧板
             playMode: "drag", // 使用拖拽模式
+            targetTime: 40, // 三星评价目标时间（秒）
+            targetMoves: 12, // 三星评价目标步数
             successText: "傍晚的海边最好看，太阳掉进海里之前，会把整面墙染成橘色。我那时不懂，以为这样的光，天天都会有。"
         },
         {
@@ -97,10 +103,12 @@ const GameConfig = {
             image: "./resources/images/2.png",
             lobbyFrameRect: { x: 0.56, y: 0.26, width: 0.30, height: 0.22 },
             // 目标区域：小孩与墓碑 (中央偏下)
-            cutoutBoundary: { x: 0.40, y: 0.55, width: 0.45, height: 0.168 },
+            cutoutBoundary: { x: 0.30, y: 0.50, width: 0.675, height: 0.252 },
             grid: { cols: 3, rows: 2 }, // 6块 (3x2)
             shapeTemplate: "classic_jigsaw",
             playMode: "timing", // 使用时机掉落模式
+            targetTime: 30,
+            targetMoves: 10,
             successText: "湖边总是雾蒙蒙的，塔顶那点光，远得像够不着。我盯着它走了好几年，竟没发现——雾里其实也有光，只是很轻。"
         },
         {
@@ -111,18 +119,23 @@ const GameConfig = {
             cutoutBoundary: { x: 0.05, y: 0.10, width: 0.35, height: 0.29 },
             grid: { cols: 2, rows: 3 }, // 6块 (2x3)
             shapeTemplate: "classic_jigsaw",
-            playMode: "timing", // 使用时机掉落模式
+            playMode: "drag", // 使用时机掉落模式
+            targetTime: 30,
+            targetMoves: 10,
             successText: "巨大的桥拱，连接着昨日与今朝。"
         },
         {
             id: 4,
             image: "./resources/images/4.png",
             lobbyFrameRect: { x: 0.54, y: 0.55, width: 0.345, height: 0.30 },
-            // 目标区域：街道、灯光与栏杆 (右下角)
-            cutoutBoundary: { x: 0.40, y: 0.60, width: 0.60, height: 0.168 },
-            grid: { cols: 4, rows: 2 }, // 8块 (4x2)
+            // 目标区域：全屏扣掉
+            cutoutBoundary: { x: 0.0, y: 0.0, width: 1.0, height: 1.0 },
+            grid: { cols: 4, rows: 3 }, // 12块 (4x3)
             shapeTemplate: "classic_jigsaw",
-            playMode: "timing", // 使用时机掉落模式
+            playMode: "drag", // 使用拖拽模式
+            noRotation: true, // 不允许倾斜
+            targetTime: 50,
+            targetMoves: 20,
             successText: "兜兜转转，我停在一条点着灯的小街。家家窗里都暖着，有人慢慢走回家。我没再往前追。这条街的光，刚好够我看清回家的路。"
         }
     ],

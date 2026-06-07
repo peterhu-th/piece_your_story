@@ -13,6 +13,9 @@ class InputManager {
 
         this.isDragging = false;
 
+        this.currentScreenX = -1000;
+        this.currentScreenY = -1000;
+
         const getPos = (e) => {
             let clientX, clientY;
             if (e.touches && e.touches.length > 0) {
@@ -27,7 +30,10 @@ class InputManager {
             }
 
             const rect = this.canvas.getBoundingClientRect();
-            return this.screenToWorld(clientX - rect.left, clientY - rect.top);
+            this.currentScreenX = clientX - rect.left;
+            this.currentScreenY = clientY - rect.top;
+            
+            return this.screenToWorld(this.currentScreenX, this.currentScreenY);
         };
 
         const handleDown = (e) => {
@@ -42,9 +48,9 @@ class InputManager {
         };
 
         const handleMove = (e) => {
+            const worldPos = getPos(e); // 顺便更新 screen 坐标
             if (!this.isDragging) return;
             e.preventDefault();
-            const worldPos = getPos(e);
             if (this.onPointerMove) this.onPointerMove(worldPos.x, worldPos.y);
         };
 
