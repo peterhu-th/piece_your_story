@@ -7,34 +7,63 @@ class InputManager {
     constructor(canvas, camera) {
         this.canvas = canvas;
         this.camera = camera;
-        this.onTap = null; // 回调函数，形如 (worldX, worldY) => {}
+        this.onPointerDown = null;
+        this.onPointerMove = null;
+        this.onPointerUp = null;
 
-        // 绑定事件
-        const handleEvent = (e) => {
-            e.preventDefault();
+        this.isDragging = false;
+
+        const getPos = (e) => {
             let clientX, clientY;
             if (e.touches && e.touches.length > 0) {
                 clientX = e.touches[0].clientX;
                 clientY = e.touches[0].clientY;
+            } else if (e.changedTouches && e.changedTouches.length > 0) {
+                clientX = e.changedTouches[0].clientX;
+                clientY = e.changedTouches[0].clientY;
             } else {
                 clientX = e.clientX;
                 clientY = e.clientY;
             }
 
             const rect = this.canvas.getBoundingClientRect();
-            const screenX = clientX - rect.left;
-            const screenY = clientY - rect.top;
-
-            // 坐标映射：屏幕 -> 相机空间
-            const worldPos = this.screenToWorld(screenX, screenY);
-
-            if (this.onTap) {
-                this.onTap(worldPos.x, worldPos.y);
-            }
+            return this.screenToWorld(clientX - rect.left, clientY - rect.top);
         };
 
-        this.canvas.addEventListener('mousedown', handleEvent, { passive: false });
-        this.canvas.addEventListener('touchstart', handleEvent, { passive: false });
+        const handleDown = (e) => {
+            e.preventDefault();
+            this.isDragging = true;
+            const worldPos = getPos(e);
+            
+            // 为了兼容老代码的 onTap
+            if (this.onTap) this.onTap(worldPos.x, worldPos.y);
+            
+            if (this.onPointerDown) this.onPointerDown(worldPos.x, worldPos.y);
+        };
+
+        const handleMove = (e) => {
+            if (!this.isDragging) return;
+            e.preventDefault();
+            const worldPos = getPos(e);
+            if (this.onPointerMove) this.onPointerMove(worldPos.x, worldPos.y);
+        };
+
+        const handleUp = (e) => {
+            e.preventDefault();
+            this.isDragging = false;
+            const worldPos = getPos(e);
+            if (this.onPointerUp) this.onPointerUp(worldPos.x, worldPos.y);
+        };
+
+        this.canvas.addEventListener('mousedown', handleDown, { passive: false });
+        this.canvas.addEventListener('touchstart', handleDown, { passive: false });
+
+        window.addEventListener('mousemove', handleMove, { passive: false });
+        window.addEventListener('touchmove', handleMove, { passive: false });
+
+        window.addEventListener('mouseup', handleUp, { passive: false });
+        window.addEventListener('touchend', handleUp, { passive: false });
+        window.addEventListener('touchcancel', handleUp, { passive: false });
     }
 
     /**

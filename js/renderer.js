@@ -130,7 +130,7 @@ class Renderer {
      * 在大厅墙壁上绘制关卡画框和模糊预览图
      * 使用预合成 (Pre-composition) 策略保证对齐
      */
-    drawLobby(wallImgSrc, levelsData, blurImagesCache, globalAlpha = 1) {
+    drawLobby(wallImgSrc, levelsData, blurImagesCache, globalAlpha = 1, currentLevelIndex = 0) {
         if (globalAlpha < 1) {
             this.ctx.globalAlpha = globalAlpha;
         }
@@ -139,7 +139,7 @@ class Renderer {
         if (!wallImg) return;
 
         // 预合成
-        if (!this.lobbyCanvas) {
+        if (!this.lobbyCanvas || this.lobbyCachedLevelIndex !== currentLevelIndex) {
             this.lobbyCanvas = document.createElement('canvas');
             this.lobbyCanvas.width = wallImg.width;
             this.lobbyCanvas.height = wallImg.height;
@@ -147,39 +147,77 @@ class Renderer {
             
             lctx.drawImage(wallImg, 0, 0);
 
-            for (const level of levelsData) {
-                const rect = level.lobbyFrameRect;
-                const drawX = rect.x * wallImg.width;
-                const drawY = rect.y * wallImg.height;
-                const drawW = rect.width * wallImg.width;
-                const drawH = rect.height * wallImg.height;
+            for (let i = 0; i < levelsData.length; i++) {
+                const level = levelsData[i];
+                const isCompleted = i < currentLevelIndex;
+                
+                // 如果已完成，则不画模糊蒙版，直接露出 wall.png 里原本的清晰图片
+                if (!isCompleted) {
+                    const rect = level.lobbyFrameRect;
+                    const drawX = rect.x * wallImg.width;
+                    const drawY = rect.y * wallImg.height;
+                    const drawW = rect.width * wallImg.width;
+                    const drawH = rect.height * wallImg.height;
 
-                const blurImg = blurImagesCache[level.image];
-                if (blurImg) {
-                    lctx.save();
-                    lctx.beginPath();
-                    lctx.rect(drawX, drawY, drawW, drawH);
-                    lctx.clip(); 
-                    
-                    const scale = Math.max(drawW / blurImg.width, drawH / blurImg.height);
-                    const bw = blurImg.width * scale;
-                    const bh = blurImg.height * scale;
-                    const bx = drawX + (drawW - bw) / 2;
-                    const by = drawY + (drawH - bh) / 2;
-                    
-                    lctx.drawImage(blurImg, bx, by, bw, bh);
-                    
-                    lctx.strokeStyle = 'rgba(0,0,0,0.5)';
-                    lctx.lineWidth = 4;
-                    lctx.strokeRect(drawX, drawY, drawW, drawH);
-                    lctx.restore();
+                    const blurImg = blurImagesCache[level.image];
+                    if (blurImg) {
+                        lctx.save();
+                        lctx.beginPath();
+                        lctx.rect(drawX, drawY, drawW, drawH);
+                        lctx.clip(); 
+                        
+                        const scale = Math.max(drawW / blurImg.width, drawH / blurImg.height);
+                        const bw = blurImg.width * scale;
+                        const bh = blurImg.height * scale;
+                        const bx = drawX + (drawW - bw) / 2;
+                        const by = drawY + (drawH - bh) / 2;
+                        
+                        lctx.drawImage(blurImg, bx, by, bw, bh);
+                        
+                        lctx.strokeStyle = 'rgba(0,0,0,0.5)';
+                        lctx.lineWidth = 4;
+                        lctx.strokeRect(drawX, drawY, drawW, drawH);
+                        lctx.restore();
+                    }
                 }
             }
+            this.lobbyCachedLevelIndex = currentLevelIndex;
         }
 
         // Contain 模式完整显示
         const params = this.getContainDrawParams(this.lobbyCanvas.width, this.lobbyCanvas.height, this.width, this.height);
         this.ctx.drawImage(this.lobbyCanvas, params.x, params.y, params.w, params.h);
+
+        // 绘制当前可解锁关卡的呼吸发光边框
+        if (currentLevelIndex < levelsData.length) {
+            const currentLevel = levelsData[currentLevelIndex];
+            const rect = currentLevel.lobbyFrameRect;
+            const drawX = params.x + rect.x * params.w;
+            const drawY = params.y + rect.y * params.h;
+            const drawW = rect.width * params.w;
+            const drawH = rect.height * params.h;
+
+            const cx = drawX + drawW / 2;
+            const cy = drawY + drawH / 2;
+            const maxR = Math.max(drawW, drawH) * 0.8;
+
+            const glowAlpha = (Math.sin(Date.now() / 300) + 1) / 2 * 0.5 + 0.3; // 0.3 to 0.8
+            
+            const gradient = this.ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
+            gradient.addColorStop(0, `rgba(255, 235, 180, ${glowAlpha})`);
+            gradient.addColorStop(0.5, `rgba(255, 200, 100, ${glowAlpha * 0.3})`);
+            gradient.addColorStop(1, `rgba(255, 180, 80, 0)`);
+
+            this.ctx.save();
+            this.ctx.globalCompositeOperation = 'screen';
+            this.ctx.fillStyle = gradient;
+            this.ctx.fillRect(drawX, drawY, drawW, drawH);
+            
+            this.ctx.strokeStyle = `rgba(255, 215, 120, ${glowAlpha * 0.8})`;
+            this.ctx.lineWidth = 4;
+            this.ctx.strokeRect(drawX, drawY, drawW, drawH);
+            this.ctx.restore();
+        }
 
         this.ctx.globalAlpha = 1;
     }
@@ -237,6 +275,13 @@ class Renderer {
         
         // 移动到碎片的当前坐标
         this.ctx.translate(piece.currentX, piece.currentY);
+
+        if (piece.rotation) {
+            // 绕着碎片自身中心旋转
+            this.ctx.translate(piece.width / 2, piece.height / 2);
+            this.ctx.rotate(piece.rotation);
+            this.ctx.translate(-piece.width / 2, -piece.height / 2);
+        }
         
         // 应用对应的拼图路径裁剪
         this.ctx.beginPath();
@@ -244,9 +289,6 @@ class Renderer {
         this.ctx.clip(path);
 
         // 映射源图像纹理
-        // 因为 sourceImg 是按 Cover 渲染到屏幕的 renderParams (bgX, bgY, bgW, bgH)
-        // 碎片的目标位置是 piece.targetX, piece.targetY
-        // 所以在 clip 内部画出对应的原图部分，需要计算偏移
         const dx = renderParams.bgX - piece.targetX;
         const dy = renderParams.bgY - piece.targetY;
         
@@ -263,19 +305,57 @@ class Renderer {
     }
 
     /**
-     * 绘制纯文本
+     * 绘制普通文字，支持自动换行
      */
-    drawText(text, x, y, size, alpha = 1) {
+    drawText(text, x, y, fontSize = 24, alpha = 1) {
         this.ctx.save();
-        this.ctx.globalAlpha = alpha;
-        this.ctx.font = `${size}px sans-serif`;
-        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        this.ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+        this.ctx.font = `${fontSize}px sans-serif`;
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
-        this.ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+        
+        // 增加投影增加可读性
+        this.ctx.shadowColor = 'rgba(0,0,0,0.8)';
         this.ctx.shadowBlur = 4;
-        this.ctx.fillText(text, x, y);
+        this.ctx.shadowOffsetY = 2;
+
+        const maxWidth = this.width * 0.8;
+        const lineHeight = fontSize * 1.5;
+        
+        // 中文按字拆分
+        const words = text.split('');
+        let line = '';
+        let currentY = y;
+        
+        // 先计算总高度，为了在y处垂直居中整个文本块
+        let lines = [];
+        for (let n = 0; n < words.length; n++) {
+            let testLine = line + words[n];
+            let metrics = this.ctx.measureText(testLine);
+            if (metrics.width > maxWidth && n > 0) {
+                lines.push(line);
+                line = words[n];
+            } else {
+                line = testLine;
+            }
+        }
+        lines.push(line);
+        
+        const totalHeight = lines.length * lineHeight;
+        let startY = y - totalHeight / 2 + lineHeight / 2;
+
+        for (let i = 0; i < lines.length; i++) {
+            this.ctx.fillText(lines[i], x, startY + i * lineHeight);
+        }
+
         this.ctx.restore();
+    }
+
+    /**
+     * 绘制带样式的关卡文案（也使用换行支持）
+     */
+    drawLevelText({ text, x, y, alpha }) {
+        this.drawText(text, x, y, 28, alpha);
     }
 }
 

@@ -69,6 +69,65 @@ class Templates {
         path.closePath();
         return path;
     }
+
+    /**
+     * 生成经典七巧板的7个形状
+     * @param {number} width 挖空区域的总宽度
+     * @param {number} height 挖空区域的总高度
+     * @returns {Array} 包含7个碎片相对坐标系路径及包围盒属性的数组
+     */
+    static getTangramShapes(width, height) {
+        // 基于 1x1 归一化坐标系定义的7个多边形顶点
+        const polygons = [
+            // 大三角1 (左上)
+            [{x: 0, y: 0}, {x: 1, y: 0}, {x: 0.5, y: 0.5}],
+            // 大三角2 (左下)
+            [{x: 0, y: 0}, {x: 0, y: 1}, {x: 0.5, y: 0.5}],
+            // 中三角 (右下部分)
+            [{x: 0.5, y: 1}, {x: 1, y: 1}, {x: 1, y: 0.5}],
+            // 小三角1 (右上部分)
+            [{x: 1, y: 0}, {x: 1, y: 0.5}, {x: 0.75, y: 0.25}],
+            // 小三角2 (中间偏下)
+            [{x: 0.25, y: 0.75}, {x: 0.75, y: 0.75}, {x: 0.5, y: 0.5}],
+            // 正方形 (中间偏右)
+            [{x: 0.5, y: 0.5}, {x: 0.75, y: 0.25}, {x: 1, y: 0.5}, {x: 0.75, y: 0.75}],
+            // 平行四边形 (左下部分)
+            [{x: 0, y: 1}, {x: 0.5, y: 1}, {x: 0.75, y: 0.75}, {x: 0.25, y: 0.75}]
+        ];
+
+        return polygons.map((poly, index) => {
+            // 计算边界框 (Bounding Box)
+            let minX = 1, minY = 1, maxX = 0, maxY = 0;
+            poly.forEach(pt => {
+                if (pt.x < minX) minX = pt.x;
+                if (pt.x > maxX) maxX = pt.x;
+                if (pt.y < minY) minY = pt.y;
+                if (pt.y > maxY) maxY = pt.y;
+            });
+
+            // 将归一化坐标转换为实际宽高，并转换为相对于 boundingBox 左上角的坐标
+            const relPoly = poly.map(pt => ({
+                x: (pt.x - minX) * width,
+                y: (pt.y - minY) * height
+            }));
+
+            const path = new Path2D();
+            path.moveTo(relPoly[0].x, relPoly[0].y);
+            for (let i = 1; i < relPoly.length; i++) {
+                path.lineTo(relPoly[i].x, relPoly[i].y);
+            }
+            path.closePath();
+
+            return {
+                id: `tangram-${index}`,
+                x: minX * width,             // 碎片相对于挖空区域的 offsetX
+                y: minY * height,            // 碎片相对于挖空区域的 offsetY
+                width: (maxX - minX) * width,
+                height: (maxY - minY) * height,
+                path2d: path
+            };
+        });
+    }
 }
 
 // 兼容导出

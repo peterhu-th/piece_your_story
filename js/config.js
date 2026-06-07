@@ -11,7 +11,8 @@ const GameConfig = {
         fps: 60,                        // 目标帧率
         snapTolerance: 50,              // 判定吸附的容错距离（像素），数值越大越容易吸附
         overlapZIndexStrategy: 'highest', // 多碎片重叠时，点击判定的层级策略：'highest' 为最上层优先
-        blurRadius: 10                  // 挖空区域的模糊滤镜半径 (px)
+        blurRadius: 10,                 // 挖空区域的模糊滤镜半径 (px)
+        lobbyBlurRadius: 20             // 大厅中未拼好画作的极度模糊半径 (px)
     },
 
     // ==========================================
@@ -33,7 +34,14 @@ const GameConfig = {
         // 视觉呈现
         showOriginalSizeInTrack: true,      // 碎片在上方轨道移动时，是否保持真实裁剪比例（否则缩放为统一大小）
         edgeStrokeColor: 'rgba(255, 255, 255, 0.4)', // 碎片边缘的半透明描边颜色，用于区分重叠图块
-        edgeStrokeWidth: 2                  // 碎片边缘描边宽度
+        edgeStrokeWidth: 2,                 // 碎片边缘描边宽度
+
+        // 拖拽模式专属配置
+        dragMode: {
+            scatterAreaY: { min: 0.70, max: 0.90 }, // 散落区域占屏幕高度的比例（下方）
+            scatterRotation: { min: -15, max: 15 }, // 散落时的随机旋转角度
+            returnSpeed: 0.15                       // 松手后飞回原位的插值系数
+        }
     },
 
     // ==========================================
@@ -48,54 +56,74 @@ const GameConfig = {
         textFadeOut: 1000       // 文字消失的淡出时间
     },
 
+    // 音频配置
+    audio: {
+        bgm: "./resources/audio/piano.mp3",
+        drum: "./resources/audio/drum.mp3"
+    },
+
     // ==========================================
-    // 4. 大厅与关卡剧本数据 (核心裁剪与文案配置)
+    // 4. UI 提示与文案
+    // ==========================================
+    ui: {
+        clickToStart: "点击画面开始",
+        nextLevelPrompt: "点击任意处继续",
+        endText: "The End",
+        errorPrompt: "哎呀，出错了，请重启试试吧~"
+    },
+
+    // ==========================================
+    // 5. 大厅与关卡剧本数据 (核心裁剪与文案配置)
     // ==========================================
     lobby: {
-        wallImage: "./images/wall.png", // 引导大厅的背景墙图片
+        wallImage: "./resources/images/wall.png", // 引导大厅的背景墙图片
     },
 
     levels: [
         {
             id: 1,
-            image: "./images/1.png", 
+            image: "./resources/images/1.png", 
             // 在大厅 wall.png 上的画框坐标百分比和宽高比例（基于 wall 图片自身的宽高）
-            lobbyFrameRect: { x: 0.08, y: 0.15, width: 0.42, height: 0.30 },
+            lobbyFrameRect: { x: 0.12, y: 0.155, width: 0.35, height: 0.28 },
             // 目标区域：海边小屋（避开左下角小孩）
             cutoutBoundary: { x: 0.45, y: 0.50, width: 0.40, height: 0.224 },
-            grid: { cols: 2, rows: 2 }, // 4块 (2x2)
-            shapeTemplate: "classic_jigsaw", // 使用凹凸经典拼图模板
-            successText: "夕阳的余晖，拼凑出今天的温柔。"
+            grid: { cols: 2, rows: 2 }, // 七巧板其实不需要grid，但这保留备用
+            shapeTemplate: "tangram", // 第一张使用七巧板
+            playMode: "drag", // 使用拖拽模式
+            successText: "傍晚的海边最好看，太阳掉进海里之前，会把整面墙染成橘色。我那时不懂，以为这样的光，天天都会有。"
         },
         {
             id: 2,
-            image: "./images/2.png",
-            lobbyFrameRect: { x: 0.51, y: 0.24, width: 0.38, height: 0.25 },
+            image: "./resources/images/2.png",
+            lobbyFrameRect: { x: 0.56, y: 0.26, width: 0.30, height: 0.22 },
             // 目标区域：小孩与墓碑 (中央偏下)
             cutoutBoundary: { x: 0.40, y: 0.55, width: 0.45, height: 0.168 },
             grid: { cols: 3, rows: 2 }, // 6块 (3x2)
             shapeTemplate: "classic_jigsaw",
-            successText: "微风拂过水面，带走岁月的尘埃。"
+            playMode: "timing", // 使用时机掉落模式
+            successText: "湖边总是雾蒙蒙的，塔顶那点光，远得像够不着。我盯着它走了好几年，竟没发现——雾里其实也有光，只是很轻。"
         },
         {
             id: 3,
-            image: "./images/3.png",
-            lobbyFrameRect: { x: 0.08, y: 0.51, width: 0.38, height: 0.30 },
+            image: "./resources/images/3.png",
+            lobbyFrameRect: { x: 0.11, y: 0.51, width: 0.35, height: 0.30 },
             // 目标区域：巨大的桥拱 (左上方)
             cutoutBoundary: { x: 0.05, y: 0.10, width: 0.35, height: 0.29 },
             grid: { cols: 2, rows: 3 }, // 6块 (2x3)
             shapeTemplate: "classic_jigsaw",
+            playMode: "timing", // 使用时机掉落模式
             successText: "巨大的桥拱，连接着昨日与今朝。"
         },
         {
             id: 4,
-            image: "./images/4.png",
-            lobbyFrameRect: { x: 0.48, y: 0.54, width: 0.41, height: 0.32 },
+            image: "./resources/images/4.png",
+            lobbyFrameRect: { x: 0.54, y: 0.55, width: 0.345, height: 0.30 },
             // 目标区域：街道、灯光与栏杆 (右下角)
             cutoutBoundary: { x: 0.40, y: 0.60, width: 0.60, height: 0.168 },
             grid: { cols: 4, rows: 2 }, // 8块 (4x2)
             shapeTemplate: "classic_jigsaw",
-            successText: "华灯初上，照亮归家的小径。"
+            playMode: "timing", // 使用时机掉落模式
+            successText: "兜兜转转，我停在一条点着灯的小街。家家窗里都暖着，有人慢慢走回家。我没再往前追。这条街的光，刚好够我看清回家的路。"
         }
     ],
 
