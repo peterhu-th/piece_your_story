@@ -48,9 +48,9 @@ class InputManager {
         };
 
         const handleMove = (e) => {
+            e.preventDefault(); // 无论是否 dragging 都阻止默认滑动（修复原生放大与黑边滚动问题）
             const worldPos = getPos(e); // 顺便更新 screen 坐标
             if (!this.isDragging) return;
-            e.preventDefault();
             if (this.onPointerMove) this.onPointerMove(worldPos.x, worldPos.y);
         };
 

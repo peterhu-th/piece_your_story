@@ -39,7 +39,7 @@ const GameConfig = {
         // 拖拽模式专属配置
         dragMode: {
             backgroundImage: "./resources/images/piece.png",
-            frameRect: { x: 0.1, y: 0.05, width: 0.8, height: 0.55 }, // 相框在 piece.png 上的相对坐标，可根据实际底图调整
+            frameRect: { x: 0.2051, y: 0.1715, width: 0.5915, height: 0.5366 }, // 相框在 piece.png 上的相对坐标，可根据实际底图调整
             scatterAreaY: { min: 0.65, max: 0.95 }, // 碎片在 piece.png 上的散落区域 Y 比例（相框下方）
             scatterRotation: { min: -15, max: 15 }, // 散落时的随机旋转角度
             returnSpeed: 0.15                       // 松手后飞回原位的插值系数
@@ -96,7 +96,7 @@ const GameConfig = {
             playMode: "drag", // 使用拖拽模式
             targetTime: 40, // 三星评价目标时间（秒）
             targetMoves: 12, // 三星评价目标步数
-            successText: "傍晚的海边最好看，太阳掉进海里之前，会把整面墙染成橘色。我那时不懂，以为这样的光，天天都会有。"
+            successWordImage: "./resources/words/word1.jpg"
         },
         {
             id: 2,
@@ -109,7 +109,7 @@ const GameConfig = {
             playMode: "timing", // 使用时机掉落模式
             targetTime: 30,
             targetMoves: 10,
-            successText: "湖边总是雾蒙蒙的，塔顶那点光，远得像够不着。我盯着它走了好几年，竟没发现——雾里其实也有光，只是很轻。"
+            successWordImage: "./resources/words/word2.jpg"
         },
         {
             id: 3,
@@ -122,7 +122,7 @@ const GameConfig = {
             playMode: "drag", // 使用时机掉落模式
             targetTime: 30,
             targetMoves: 10,
-            successText: "巨大的桥拱，连接着昨日与今朝。"
+            successWordImage: "./resources/words/word3.jpg"
         },
         {
             id: 4,
@@ -136,7 +136,7 @@ const GameConfig = {
             noRotation: true, // 不允许倾斜
             targetTime: 50,
             targetMoves: 20,
-            successText: "兜兜转转，我停在一条点着灯的小街。家家窗里都暖着，有人慢慢走回家。我没再往前追。这条街的光，刚好够我看清回家的路。"
+            successWordImage: "./resources/words/word4.jpg"
         }
     ],
 
@@ -146,11 +146,7 @@ const GameConfig = {
     ending: {
         slideshowInterval: 3500,      // 结局时，每张图片轮播展示的间隔时长(ms)
         fadeToBlackDuration: 2500,    // 最后屏幕逐渐变黑的过渡时长(ms)
-        finalTexts: [
-            "感谢你",
-            "寻回这些遗失的时光",
-            "晚安。"
-        ]
+        finalImage: "./resources/words/word5.jpg"
     },
     
     ui: {

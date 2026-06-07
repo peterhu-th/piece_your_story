@@ -44,9 +44,7 @@ class GameCore {
         this.endingLastSlideTime = 0;
 
         // 星级与游玩数据记录
-        this.levelPlayTime = 0;
         this.currentMoves = 0;
-        this.levelStars = JSON.parse(localStorage.getItem('piece_levelStars')) || []; // {id: 1, stars: 3}
         
         // 雨滴粒子系统
         this.rainParticles = [];
@@ -128,7 +126,6 @@ class GameCore {
             }
         }
         else if (newState === this.STATES.PLAY) {
-            this.levelPlayTime = 0;
             this.currentMoves = 0;
 
             const waitingPieces = this.pieces.filter(p => p.state === 'WAITING');
@@ -147,25 +144,7 @@ class GameCore {
         }
         else if (newState === this.STATES.SETTLE) {
             // 结算阶段（计算并存储星级）
-            const levelData = this.config.levels[this.currentLevelIndex];
-            const targetTime = levelData.targetTime || 30;
-            const targetMoves = levelData.targetMoves || 10;
-            
-            let stars = 1; // 基础1星
-            const actualTime = this.levelPlayTime / 1000;
-            if (actualTime <= targetTime) stars++; // 达标时间+1星
-            if (this.currentMoves <= targetMoves) stars++; // 达标步数+1星
-
-            // 保存或更新记录
-            const existingRecord = this.levelStars.find(s => s.id === levelData.id);
-            if (existingRecord) {
-                if (stars > existingRecord.stars) {
-                    existingRecord.stars = stars;
-                }
-            } else {
-                this.levelStars.push({ id: levelData.id, stars: stars });
-            }
-            localStorage.setItem('piece_levelStars', JSON.stringify(this.levelStars));
+            // 竞技元素（星级与时间）已移除
         }
         else if (newState === this.STATES.END) {
             this.endingSlideIndex = 0;
@@ -184,13 +163,22 @@ class GameCore {
             const bgImg = this.renderer.getImage(dragConf.backgroundImage);
             this.bgParams = this.renderer.getContainDrawParams(bgImg.width, bgImg.height, this.renderer.width, this.renderer.height);
             
-            // 拼图相框区域
-            this.puzzleRect = {
+            // 拼图相框物理区域
+            const frameRect = {
                 x: this.bgParams.x + dragConf.frameRect.x * this.bgParams.w,
                 y: this.bgParams.y + dragConf.frameRect.y * this.bgParams.h,
                 width: dragConf.frameRect.width * this.bgParams.w,
                 height: dragConf.frameRect.height * this.bgParams.h
             };
+            
+            // 严格无白边地将原图填满相框（多余部分轻微裁切），消除两边透明缝隙
+            const levelImg = this.renderer.getImage(levelData.image);
+            this.coverParams = this.renderer.getCoverDrawParams(
+                levelImg.width, levelImg.height, frameRect.width, frameRect.height, frameRect.x, frameRect.y
+            );
+            
+            // 拼图相框区域（必须严格等于相框物理区域，防止拼图碎片溢出画框）
+            this.puzzleRect = frameRect;
             
             // 拼图切块区域（相当于把原图缩放并放在 puzzleRect 中，然后再依据 cutoutBoundary 切割）
             this.cutoutBox = {
@@ -289,11 +277,13 @@ class GameCore {
                 if (mode === "drag") {
                     const dragConf = this.config.pieces.dragMode;
                     const scatterMinY = this.bgParams.y + this.bgParams.h * dragConf.scatterAreaY.min;
-                    const scatterMaxY = this.bgParams.y + this.bgParams.h * dragConf.scatterAreaY.max - p.height;
+                    // 【修复】：防止碎片过大导致 max 小于 min 的溢出问题
+                    const scatterMaxY = Math.max(scatterMinY, this.bgParams.y + this.bgParams.h * dragConf.scatterAreaY.max - p.height);
                     const spawnY = scatterMinY + Math.random() * (scatterMaxY - scatterMinY);
                     
                     const scatterMinX = this.bgParams.x;
-                    const scatterMaxX = this.bgParams.x + this.bgParams.w - p.width;
+                    // 【修复】：同理，修复 X 轴溢出
+                    const scatterMaxX = Math.max(scatterMinX, this.bgParams.x + this.bgParams.w - p.width);
                     const spawnX = scatterMinX + Math.random() * (scatterMaxX - scatterMinX);
                     
                     p.state = 'MOVING'; // 在拖拽模式下，MOVING表示自由散落状态
@@ -315,8 +305,9 @@ class GameCore {
                     const worldPosRight = this.input.screenToWorld(this.renderer.width + 100, trackY);
 
                     p.state = 'MOVING';
-                    const safeY = Math.min(worldPosLeft.y, this.cutoutBox.y - p.height - 20);
-                    p.currentY = safeY;
+                    // 【修复】：直接使用轨道高度，不再强行受 cutoutBox.y 挤压飞出屏幕
+                    p.currentY = worldPosLeft.y;
+
                     if (isLeft) {
                         p.currentX = worldPosRight.x;
                         p.speedX = -speed / this.renderer.camera.scale;
@@ -453,8 +444,13 @@ class GameCore {
             return;
         }
         else if (this.currentState === this.STATES.VIEW_COMPLETED) {
-            this.switchState(this.STATES.LOBBY);
-            return;
+            if (worldY > this.renderer.height - 60) {
+                this.switchState(this.STATES.LOBBY);
+                return;
+            }
+            
+            const levelData = this.config.levels[this.viewingLevelIndex];
+            this.exportCompletedImage(levelData);
         }
         else if (this.currentState === this.STATES.SETTLE) {
             // Settle 结束且提示文字展示完毕后，点击进入下一关或结局
@@ -477,9 +473,52 @@ class GameCore {
             if (timeSince > startFadeToBlackTime + this.config.ending.fadeToBlackDuration) {
                 // 回到大厅重新游玩，不清除星级记录
                 this.currentLevelIndex = 0;
-                this.totalPlayTime = 0;
                 this.switchState(this.STATES.LOBBY);
             }
+        }
+    }
+
+    /**
+     * 导出带有居中文案的原图
+     */
+    exportCompletedImage(levelData) {
+        const bgImg = this.renderer.getImage(levelData.image);
+        if (!bgImg) return;
+        
+        const exportCanvas = document.createElement('canvas');
+        exportCanvas.width = bgImg.width;
+        exportCanvas.height = bgImg.height;
+        const ectx = exportCanvas.getContext('2d');
+        
+        ectx.drawImage(bgImg, 0, 0);
+        
+        const wordImg = this.renderer.getImage(levelData.successWordImage);
+        if (wordImg) {
+            ectx.save();
+            ectx.globalCompositeOperation = 'multiply';
+            
+            const targetW = bgImg.width * 0.7;
+            const scale = targetW / wordImg.width;
+            const targetH = wordImg.height * scale;
+            const targetX = (bgImg.width - targetW) / 2;
+            const targetY = (bgImg.height - targetH) / 2;
+            
+            ectx.drawImage(wordImg, targetX, targetY, targetW, targetH);
+            ectx.restore();
+        }
+        
+        const link = document.createElement('a');
+        link.download = `piece_story_${levelData.id}.png`;
+        link.href = exportCanvas.toDataURL('image/png', 0.9);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        const toast = document.getElementById('toast');
+        if (toast) {
+            toast.textContent = '图片已开始导出';
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2000);
         }
     }
 
@@ -508,8 +547,6 @@ class GameCore {
         }
 
         if (this.currentState === this.STATES.PLAY) {
-            this.totalPlayTime += dt;
-            this.levelPlayTime += dt;
             let allPlaced = true;
             const conf = this.config.pieces;
             const mode = this.config.levels[this.currentLevelIndex].playMode || "timing";
@@ -605,13 +642,21 @@ class GameCore {
             const ease = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
             
             // 目标中心点和缩放
-            const targetCenterX = this.cutoutBox.x + this.cutoutBox.width / 2 - this.renderer.width / 2;
-            const targetCenterY = this.cutoutBox.y + this.cutoutBox.height / 2 - this.renderer.height / 2;
+            let targetCenterX = this.cutoutBox.x + this.cutoutBox.width / 2 - this.renderer.width / 2;
+            let targetCenterY = this.cutoutBox.y + this.cutoutBox.height / 2 - this.renderer.height / 2;
             
-            // 计算屏幕需要缩放多大才能包含整个 cutout，为了看清周围内容，不要过度放大
-            const scaleW = this.renderer.width / this.cutoutBox.width;
-            const scaleH = this.renderer.height / this.cutoutBox.height;
-            const targetScale = Math.min(Math.min(scaleW, scaleH) * 0.45, 1.8); // 留较多边距，最高放大1.8倍
+            // 【修复】：优化缩放逻辑，目标放大到占据屏幕的80%，同时绝对不允许缩小(最低为1)
+            const scaleW = (this.renderer.width * 0.8) / this.cutoutBox.width;
+            const scaleH = (this.renderer.height * 0.8) / this.cutoutBox.height;
+            let targetScale = Math.max(1, Math.min(scaleW, scaleH));
+
+            const mode = this.config.levels[this.currentLevelIndex].playMode || "timing";
+            if (mode === "drag") {
+                // 【修复】：拖拽模式必须保持整个桌面可见，不进行缩放和平移
+                targetCenterX = 0;
+                targetCenterY = 0;
+                targetScale = 1;
+            }
 
             this.renderer.camera.x = targetCenterX * ease;
             this.renderer.camera.y = targetCenterY * ease;
@@ -627,11 +672,18 @@ class GameCore {
             const ease = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
             
             // 反向执行，这里假设 INTRO 结束时的 camera 状态是我们的起点
-            const startX = this.cutoutBox.x + this.cutoutBox.width / 2 - this.renderer.width / 2;
-            const startY = this.cutoutBox.y + this.cutoutBox.height / 2 - this.renderer.height / 2;
-            const scaleW = this.renderer.width / this.cutoutBox.width;
-            const scaleH = this.renderer.height / this.cutoutBox.height;
-            const startScale = Math.min(Math.min(scaleW, scaleH) * 0.45, 1.8);
+            let startX = this.cutoutBox.x + this.cutoutBox.width / 2 - this.renderer.width / 2;
+            let startY = this.cutoutBox.y + this.cutoutBox.height / 2 - this.renderer.height / 2;
+            const scaleW = (this.renderer.width * 0.8) / this.cutoutBox.width;
+            const scaleH = (this.renderer.height * 0.8) / this.cutoutBox.height;
+            let startScale = Math.max(1, Math.min(scaleW, scaleH));
+
+            const mode = this.config.levels[this.currentLevelIndex].playMode || "timing";
+            if (mode === "drag") {
+                startX = 0;
+                startY = 0;
+                startScale = 1;
+            }
 
             this.renderer.camera.x = startX * (1 - ease);
             this.renderer.camera.y = startY * (1 - ease);
@@ -670,11 +722,18 @@ class GameCore {
                 }
             }
 
+            const mode = levelData.playMode || "timing";
+            
             if (mode === "drag") {
                 // 拖拽模式使用专属桌面底图
                 this.renderer.drawGameBackground(this.config.pieces.dragMode.backgroundImage, null, this.bgParams, 0);
-                // 绘制相框内的底图 (半透明或者变清晰的图)
-                this.renderer.drawLevelImageRect(levelData.image, this.blurCache[levelData.image], this.puzzleRect, blurAlpha);
+                // 绘制相框内的底图 (使用 coverParams 消除白边，并用 puzzleRect 即物理画框严格裁切防溢出)
+                this.renderer.ctx.save();
+                this.renderer.ctx.beginPath();
+                this.renderer.ctx.rect(this.puzzleRect.x, this.puzzleRect.y, this.puzzleRect.width, this.puzzleRect.height);
+                this.renderer.ctx.clip();
+                this.renderer.drawLevelImageRect(levelData.image, this.blurCache[levelData.image], this.coverParams, blurAlpha);
+                this.renderer.ctx.restore();
                 
                 // 画提示边框 (针对 cutoutBox)
                 if (this.currentState !== this.STATES.SETTLE || blurAlpha > 0) {
@@ -683,18 +742,22 @@ class GameCore {
             } else {
                 this.renderer.drawGameBackground(levelData.image, this.blurCache[levelData.image], this.bgParams, blurAlpha);
                 if (this.currentState !== this.STATES.SETTLE || blurAlpha > 0) {
-                    this.renderer.drawCutoutHole(this.cutoutBox);
                     this.renderer.drawCutoutBorder(this.cutoutBox);
                 }
             }
 
-            // 准备给碎片的渲染参数，由于 drag 模式底图缩小到了 puzzleRect，碎片贴图需要对齐 puzzleRect
+            // 准备给碎片的渲染参数，由于 drag 模式底图使用了 coverParams 以消除白边，碎片贴图需对齐 coverParams
             const pieceRenderParams = mode === "drag" ? {
-                bgX: this.puzzleRect.x,
-                bgY: this.puzzleRect.y,
-                bgW: this.puzzleRect.width,
-                bgH: this.puzzleRect.height
-            } : this.bgParams;
+                bgX: this.coverParams.x,
+                bgY: this.coverParams.y,
+                bgW: this.coverParams.w,
+                bgH: this.coverParams.h
+            } : {
+                bgX: this.bgParams.x,
+                bgY: this.bgParams.y,
+                bgW: this.bgParams.w,
+                bgH: this.bgParams.h
+            };
 
             // 画放置好的碎片 (它们带有自己的遮罩，所以实际上它们是清晰的)
             const srcImg = this.renderer.getImage(levelData.image);
@@ -712,10 +775,14 @@ class GameCore {
 
             // 如果处于游玩状态，绘制 UI 进度条
             if (this.currentState === this.STATES.PLAY) {
+                this.renderer.restoreCamera(); // 【修复】：绘制 UI 前必须先恢复屏幕原本坐标系
+
                 const totalPieces = this.pieces.length;
                 const placedPieces = this.pieces.filter(p => p.state === 'PLACED').length;
                 const maxMoves = this.config.levels[this.currentLevelIndex].targetMoves || 10;
                 this.renderer.drawProgressBar(placedPieces, totalPieces, this.currentMoves, maxMoves);
+
+                this.renderer.applyCamera();   // 恢复相机转换，以免影响后面代码
             }
         }
         else if (this.currentState === this.STATES.END) {
@@ -751,18 +818,27 @@ class GameCore {
                     const levelData = this.config.levels[imageIndex];
                     this.renderer.drawGameBackground(levelData.image, null, this.bgParams, 0); // 只画清晰
                     
-                    // 叠加半透明黑底凸显文字
-                    this.renderer.ctx.save();
-                    this.renderer.ctx.fillStyle = `rgba(0, 0, 0, ${0.4 * alpha})`;
-                    this.renderer.ctx.fillRect(-this.renderer.camera.x, -this.renderer.camera.y, this.renderer.width * 2, this.renderer.height * 2);
-                    this.renderer.restoreCamera(); // 文字用屏幕坐标
-                    
-                    this.renderer.drawText(levelData.successText, this.renderer.width/2, this.renderer.height * 0.8, 24, alpha);
+                    this.renderer.restoreCamera(); // UI层不缩放
+                    const wordImg = this.renderer.getImage(levelData.successWordImage);
+                    if (wordImg) {
+                        this.renderer.ctx.save();
+                        this.renderer.ctx.globalAlpha = alpha;
+                        this.renderer.ctx.globalCompositeOperation = 'multiply';
+                        
+                        const targetW = this.bgParams.w * 0.7;
+                        const scale = targetW / wordImg.width;
+                        const targetH = wordImg.height * scale;
+                        const targetX = this.bgParams.x + (this.bgParams.w - targetW) / 2;
+                        const targetY = this.bgParams.y + (this.bgParams.h - targetH) / 2;
+                        
+                        this.renderer.ctx.drawImage(wordImg, targetX, targetY, targetW, targetH);
+                        this.renderer.ctx.restore();
+                    }
                     this.renderer.applyCamera();
                 }
             }
             else {
-                // 3. 黑屏与致谢
+                // 3. 黑屏与致谢图片
                 const fadeTime = elapsed - startFadeToBlackTime;
                 const fadeProgress = Math.min(1, fadeTime / this.config.ending.fadeToBlackDuration);
                 
@@ -771,17 +847,13 @@ class GameCore {
                 
                 if (fadeProgress >= 1) {
                     this.renderer.restoreCamera();
-                    this.config.ending.finalTexts.forEach((txt, i) => {
-                        this.renderer.drawText(txt, this.renderer.width/2, this.renderer.height/2 + i * 40 - 80, 24, 1);
-                    });
+                    const finalImg = this.renderer.getImage(this.config.ending.finalImage);
+                    if (finalImg) {
+                        const finalParams = this.renderer.getContainDrawParams(finalImg.width, finalImg.height, this.renderer.width, this.renderer.height);
+                        this.renderer.ctx.drawImage(finalImg, finalParams.x, finalParams.y, finalParams.w, finalParams.h);
+                    }
                     
-                    const timeStr = `累计用时：${Math.ceil(this.totalPlayTime / 1000)} 秒`;
-                    const totalStars = this.levelStars.reduce((sum, r) => sum + r.stars, 0);
-                    const starStr = `共获得：${totalStars} 颗星`;
-                    
-                    this.renderer.drawText(timeStr, this.renderer.width/2, this.renderer.height/2 + this.config.ending.finalTexts.length * 40, 18, 1);
-                    this.renderer.drawText(starStr, this.renderer.width/2, this.renderer.height/2 + this.config.ending.finalTexts.length * 40 + 30, 20, 1);
-                    this.renderer.drawText("点击任意处返回大厅重新游玩", this.renderer.width/2, this.renderer.height * 0.9, 16, 0.6);
+                    this.renderer.drawText("点击任意处返回大厅重新游玩", this.renderer.width/2, this.renderer.height * 0.95, 16, 0.6);
                     this.renderer.applyCamera();
                 }
             }
@@ -792,15 +864,36 @@ class GameCore {
             // 使用 getContainDrawParams 绘制完整的原图
             this.renderer.drawGameBackground(levelData.image, null, this.bgParams, 0); 
             
-            // 绘制文字蒙版
-            this.renderer.ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-            this.renderer.ctx.fillRect(0, 0, this.renderer.width, this.renderer.height);
+            // 计算时间
+            const elapsed = performance.now() - this.stateStartTime;
+            if (elapsed > 1000) {
+                // 延迟1秒后缓慢出现
+                const fadeAlpha = Math.min(1, (elapsed - 1000) / 2000); // 2秒淡入
+                
+                const wordImg = this.renderer.getImage(levelData.successWordImage);
+                if (wordImg) {
+                    this.renderer.ctx.save();
+                    this.renderer.ctx.globalAlpha = fadeAlpha;
+                    this.renderer.ctx.globalCompositeOperation = 'multiply';
+                    
+                    // 将文字图片按照一定比例（如宽度的70%）居中叠加
+                    const targetW = this.bgParams.w * 0.7;
+                    const scale = targetW / wordImg.width;
+                    const targetH = wordImg.height * scale;
+                    const targetX = this.bgParams.x + (this.bgParams.w - targetW) / 2;
+                    const targetY = this.bgParams.y + (this.bgParams.h - targetH) / 2;
+                    
+                    this.renderer.ctx.drawImage(wordImg, targetX, targetY, targetW, targetH);
+                    this.renderer.ctx.restore();
+                }
+            }
 
-            // 绘制当前关卡的成功文案
-            this.renderer.drawText(levelData.successText, this.renderer.width/2, this.renderer.height * 0.2, 28, 1);
+            // 绘制操作提示蒙版底色（只在底部）
+            this.renderer.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            this.renderer.ctx.fillRect(0, this.renderer.height - 60, this.renderer.width, 60);
 
-            // 绘制返回提示
-            this.renderer.drawText('点击任意处返回', this.renderer.width/2, this.renderer.height * 0.9, 18, 1);
+            // 绘制返回与保存提示
+            this.renderer.drawText('点击屏幕上方导出图片 | 点击底部区域返回大厅', this.renderer.width/2, this.renderer.height - 25, 16, 1);
         }
 
         this.renderer.restoreCamera();

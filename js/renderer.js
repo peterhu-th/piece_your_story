@@ -127,6 +127,19 @@ class Renderer {
     }
 
     /**
+     * 计算保持比例填充目标区域（多余部分会被裁切）的绘制参数
+     * (Cover 逻辑，用于消除白边)
+     */
+    getCoverDrawParams(imgWidth, imgHeight, targetWidth, targetHeight, targetX = 0, targetY = 0) {
+        const scale = Math.max(targetWidth / imgWidth, targetHeight / imgHeight);
+        const w = imgWidth * scale;
+        const h = imgHeight * scale;
+        const x = targetX + (targetWidth - w) / 2;
+        const y = targetY + (targetHeight - h) / 2;
+        return { x, y, w, h, scale };
+    }
+
+    /**
      * 在大厅墙壁上绘制关卡画框和模糊预览图
      * 使用预合成 (Pre-composition) 策略保证对齐
      */
@@ -188,18 +201,8 @@ class Renderer {
         const params = this.getContainDrawParams(this.lobbyCanvas.width, this.lobbyCanvas.height, this.width, this.height);
         this.ctx.drawImage(this.lobbyCanvas, params.x, params.y, params.w, params.h);
 
-        // 检查是否全部三星
-        const allThreeStars = levelsData.length > 0 && levelsData.every(l => {
-            const s = levelStars.find(record => record.id === l.id);
-            return s && s.stars === 3;
-        });
-
-        // 绘制当前可解锁关卡的呼吸发光边框，或者全三星的金色光芒
-        if (allThreeStars) {
-            levelsData.forEach(level => {
-                this._drawGlowFrame(level.lobbyFrameRect, params, 'gold');
-            });
-        } else if (currentLevelIndex < levelsData.length) {
+        // 绘制当前可解锁关卡的呼吸发光边框
+        if (currentLevelIndex < levelsData.length) {
             const currentLevel = levelsData[currentLevelIndex];
             this._drawGlowFrame(currentLevel.lobbyFrameRect, params, 'normal');
         }
@@ -260,25 +263,38 @@ class Renderer {
         const clearImg = this.getImage(clearImgSrc);
         if (!clearImg) return;
         
-        const params = this.getContainDrawParams(clearImg.width, clearImg.height, this.width, this.height);
+        // 优先使用传入的静态物理位置参数，确保与初始化时计算的切块坐标绝对对齐
+        let drawX, drawY, drawW, drawH;
+        if (renderParams && renderParams.w !== undefined) {
+            drawX = renderParams.x;
+            drawY = renderParams.y;
+            drawW = renderParams.w;
+            drawH = renderParams.h;
+        } else {
+            const params = this.getContainDrawParams(clearImg.width, clearImg.height, this.width, this.height);
+            drawX = params.x;
+            drawY = params.y;
+            drawW = params.w;
+            drawH = params.h;
+            
+            // 导出计算出的参数
+            if (renderParams) {
+                renderParams.x = params.x;
+                renderParams.y = params.y;
+                renderParams.w = params.w;
+                renderParams.h = params.h;
+            }
+        }
         
         // 渲染清晰底图
-        this.ctx.drawImage(clearImg, params.x, params.y, params.w, params.h);
+        this.ctx.drawImage(clearImg, drawX, drawY, drawW, drawH);
         
         // 叠加模糊层
         if (blurAlpha > 0 && blurImg) {
             this.ctx.save();
             this.ctx.globalAlpha = blurAlpha;
-            this.ctx.drawImage(blurImg, params.x, params.y, params.w, params.h);
+            this.ctx.drawImage(blurImg, drawX, drawY, drawW, drawH);
             this.ctx.restore();
-        }
-
-        // 导出此时的图片相对于屏幕的真实渲染位置，用于 core.js 计算边界盒物理位置
-        if (renderParams) {
-            renderParams.bgX = params.x;
-            renderParams.bgY = params.y;
-            renderParams.bgW = params.w;
-            renderParams.bgH = params.h;
         }
     }
 
@@ -438,43 +454,7 @@ class Renderer {
         this.ctx.restore();
     }
 
-    /**
-     * 绘制游戏UI进度条
-     */
-    drawProgressBar(placedPieces, totalPieces, currentMoves, maxMoves) {
-        this.ctx.save();
-        
-        // 进度条本身
-        const barWidth = this.width * 0.6;
-        const barHeight = 8;
-        const x = (this.width - barWidth) / 2;
-        const y = 20;
 
-        // 背景槽
-        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-        this.ctx.beginPath();
-        this.ctx.roundRect(x, y, barWidth, barHeight, barHeight / 2);
-        this.ctx.fill();
-
-        // 进度
-        const progress = placedPieces / totalPieces;
-        if (progress > 0) {
-            this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-            this.ctx.beginPath();
-            this.ctx.roundRect(x, y, barWidth * progress, barHeight, barHeight / 2);
-            this.ctx.fill();
-        }
-
-        // 文字信息
-        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-        this.ctx.font = '14px sans-serif';
-        this.ctx.textAlign = 'right';
-        this.ctx.fillText(`步数: ${currentMoves}`, x + barWidth, y + 25);
-        this.ctx.textAlign = 'left';
-        this.ctx.fillText(`进度: ${placedPieces}/${totalPieces}`, x, y + 25);
-
-        this.ctx.restore();
-    }
 
     /**
      * 绘制主大厅的探照灯效果
